@@ -42,11 +42,14 @@ def run_once(server: ServerClient, analyzer: Analyzer, step_delay: float = 0.0) 
         )
 
         # 판정안 근거는 Agent가 실제로 본 거래번호로만 한정한다. 만들어 낸 번호는 서버가 PST0005로 막기 전에 걸러 낸다
+        # 정상 갈래 근거에서 빼야 하는 다툼 거래와 다툼 이후 거래도 함께 기억한다
         seen = {t["transactionNumber"] for t in context["disputedTransfers"]}
+        tainted = set(seen)
 
         def ledger(start: str | None, end: str | None, counterparty: str | None) -> list[dict[str, Any]]:
             items = server.ledger(token, objection_id, start, end, counterparty)
             seen.update(i["transactionNumber"] for i in items)
+            tainted.update(i["transactionNumber"] for i in items if i["disputed"] or i["afterDispute"])
             return items
 
         def on_tool_call(call: ToolCall) -> None:
@@ -64,7 +67,7 @@ def run_once(server: ServerClient, analyzer: Analyzer, step_delay: float = 0.0) 
             )
 
         analysis = analyzer.analyze(context, ledger, on_tool_call)
-        _keep_seen(analysis.draft, seen)
+        _keep_seen(analysis.draft, seen, tainted)
         _record_findings(steps, analysis)
         result = server.submit_draft(token, objection_id, _draft_request(analysis))
         log.info("판정안 제출 runId=%s agent=%s gate=%s", run_id, result["agentBranch"], result["gateBranch"])
@@ -79,8 +82,11 @@ def run_once(server: ServerClient, analyzer: Analyzer, step_delay: float = 0.0) 
     return True
 
 
-def _keep_seen(draft: dict[str, Any], seen: set[str]) -> None:
-    draft["evidenceTransactionNumbers"] = [n for n in draft["evidenceTransactionNumbers"] if n in seen]
+def _keep_seen(draft: dict[str, Any], seen: set[str], tainted: set[str]) -> None:
+    excluded = tainted if draft["branch"] in ("NORMAL_ACCEPT", "NORMAL_PARTIAL") else set()
+    draft["evidenceTransactionNumbers"] = [
+        n for n in draft["evidenceTransactionNumbers"] if n in seen and n not in excluded
+    ]
     for item in draft["contradictions"]:
         item["transactionNumbers"] = [n for n in item["transactionNumbers"] if n in seen]
 
@@ -156,6 +162,7 @@ def build_analyzer(config: Config) -> Analyzer:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     config = Config.from_env()
     if not config.worker_key:
         raise SystemExit("PAYMENT_STOP_WORKER_KEY 가 비어 있습니다.")

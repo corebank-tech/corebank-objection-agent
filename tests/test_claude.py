@@ -14,7 +14,7 @@ from tests.fake_server import DISPUTED, FakeServer, relationship_ledger
 DRAFT = {
     "branch": "NORMAL_ACCEPT",
     "branchReason": "다툼 이전 관계 거래 3회",
-    "evidenceTransactionNumbers": ["20991231WB0000000001", "20991231WB0000000002", "20991231WB9999999999"],
+    "evidenceTransactionNumbers": ["20991231WB0000000001", "20991231WB0000000002", "20991231WB9999999999", DISPUTED],
     "claims": [{"text": "친구에게 빌려준 돈", "quote": "친구에게 빌려준 돈입니다."}],
     "contradictions": [],
     "missingDocuments": [],
@@ -64,7 +64,7 @@ def test_tool_loop_records_tool_call_and_drops_unseen_evidence():
 
     assert [s["type"] for s in fake.steps] == ["CLAIMED", "CONTEXT_LOADED", "TOOL_CALL", "CLAIM_EXTRACTED", "DRAFT_SUBMITTED"]
     draft = fake.drafts[0]
-    # 도구가 돌려주지 않은 번호는 빠진다
+    # 도구가 돌려주지 않은 번호와 정상 갈래의 다툼 거래는 빠진다
     assert draft["evidenceTransactionNumbers"] == ["20991231WB0000000001", "20991231WB0000000002"]
     assert draft["inputTokens"] == 1000 + 200 + 900 + 900
     assert draft["costMicroUsd"] == cost_micro_usd(Usage(1200, 350, 900, 900))

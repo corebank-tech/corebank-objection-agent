@@ -58,3 +58,13 @@ def test_expired_token_does_not_record_more_steps():
     run_once(client(fake), ScriptedAnalyzer())
 
     assert fake.steps[-1]["type"] == "DRAFT_SUBMITTED"
+
+
+def test_step_starts_when_previous_step_ended():
+    fake = FakeServer(relationship_ledger(), "친구에게 빌려준 돈입니다.")
+
+    run_once(client(fake), ScriptedAnalyzer())
+
+    for previous, step in zip(fake.steps, fake.steps[1:]):
+        assert step["startedAt"] >= previous["endedAt"]
+        assert step["endedAt"] >= step["startedAt"]

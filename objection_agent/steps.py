@@ -16,6 +16,8 @@ class StepRecorder:
         self._run_id = run_id
         self._seq = next_seq
         self._delay = delay_seconds
+        # 단계의 시작은 앞 단계가 끝난 때다. 모델이 생각하고 도구를 고른 시간이 그 단계의 소요 시간으로 보인다
+        self._last_end = datetime.now()
 
     def record(
         self,
@@ -37,10 +39,11 @@ class StepRecorder:
                 "summary": summary[:500] if summary else None,
                 "detail": detail,
                 "status": status,
-                "startedAt": (started_at or now).isoformat(timespec="microseconds"),
+                "startedAt": (started_at or self._last_end).isoformat(timespec="microseconds"),
                 "endedAt": now.isoformat(timespec="microseconds"),
             },
         )
         self._seq += 1
         if self._delay:
             time.sleep(self._delay)
+        self._last_end = datetime.now()
