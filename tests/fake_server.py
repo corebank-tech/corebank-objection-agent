@@ -10,7 +10,9 @@ import httpx
 DISPUTED = "20991231WB0000000009"
 
 
-def item(number: str, direction: str, amount: int, at: str, cp: str | None = "CP-0000000a", disputed=False, after=False):
+def item(
+    number: str, direction: str, amount: int, at: str, cp: str | None = "CP-0000000a", disputed=False, after=False
+):
     return {
         "transactionNumber": number,
         "direction": direction,
@@ -61,20 +63,22 @@ class FakeServer:
             return _ok(self.queue.pop(0) if self.queue else None)
         assert request.headers["X-Job-Token"] == "tok"
         if path == "/internal/objections/7/context":
-            return _ok({
-                "objectionId": 7,
-                "runId": 41,
-                "clause": 1,
-                "statement": self.statement,
-                "simplifiedRequested": False,
-                "idCopyConfirmed": True,
-                "litigationPending": False,
-                "objectionDeadline": "2026-12-05",
-                "disputedTransfers": [i for i in self.ledger if i["disputed"]],
-                "commonDocuments": ["거래 사실 확인 자료", "상대방과의 관계 소명 자료"],
-                "ledgerFrom": "2026-05-09T10:00:00",
-                "ledgerTo": "2026-11-06T10:00:00",
-            })
+            return _ok(
+                {
+                    "objectionId": 7,
+                    "runId": 41,
+                    "clause": 1,
+                    "statement": self.statement,
+                    "simplifiedRequested": False,
+                    "idCopyConfirmed": True,
+                    "litigationPending": False,
+                    "objectionDeadline": "2026-12-05",
+                    "disputedTransfers": [i for i in self.ledger if i["disputed"]],
+                    "commonDocuments": ["거래 사실 확인 자료", "상대방과의 관계 소명 자료"],
+                    "ledgerFrom": "2026-05-09T10:00:00",
+                    "ledgerTo": "2026-11-06T10:00:00",
+                }
+            )
         if path == "/internal/objections/7/ledger":
             params = dict(request.url.params)
             self.ledger_calls.append(params)

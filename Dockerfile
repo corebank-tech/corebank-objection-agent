@@ -1,7 +1,19 @@
-FROM python:3.12-slim
+# 기반 이미지는 다이제스트로 고정한다. 갱신은 Dependabot 이 PR 로 올린다
+FROM python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY objection_agent ./objection_agent
-USER nobody
+COPY --chmod=a=r requirements.txt .
+RUN pip install --require-hashes -r requirements.txt
+
+# 프롬프트(objection_agent/prompts.py)는 git-crypt 로 암호화돼 있다. 실행용 이미지는 잠금을 푼 작업 사본에서만 빌드하고,
+# 그 이미지는 공개 레지스트리에 올리지 않는다(SECURITY.md)
+COPY --chmod=a=rX objection_agent ./objection_agent
+
+# 쓰기 권한 없는 사용자로 돈다. 키는 실행 시 환경변수로만 받는다
+USER 65534:65534
 CMD ["python", "-m", "objection_agent"]

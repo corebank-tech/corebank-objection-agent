@@ -18,7 +18,7 @@ class Config:
     max_tool_turns: int
 
     @staticmethod
-    def from_env() -> "Config":
+    def from_env() -> Config:
         return Config(
             server_base_url=os.environ.get("CORE_SERVER_URL", "http://localhost:8080/api/v1").rstrip("/"),
             worker_key=os.environ.get("PAYMENT_STOP_WORKER_KEY", ""),

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 # 원장 조회 함수: (from, to, counterparty) -> 원장 항목 목록
 LedgerFn = Callable[[str | None, str | None, str | None], list[dict[str, Any]]]
@@ -27,7 +28,7 @@ class Usage:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
 
-    def add(self, other: "Usage") -> None:
+    def add(self, other: Usage) -> None:
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
         self.cache_read_tokens += other.cache_read_tokens

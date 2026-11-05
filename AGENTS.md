@@ -5,7 +5,8 @@
 ## 명령
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python --require-hashes -r requirements.txt -r requirements-dev.txt
+.venv/bin/ruff check . && .venv/bin/ruff format .   # 커밋 전 필수. CI 가 막는다
 .venv/bin/python -m pytest -q                  # 워커 테스트(가짜 서버, 가짜 Anthropic 응답)
 .venv/bin/python -m objection_agent            # 워커 실행. 환경변수는 README
 .venv/bin/python eval/analyze.py <results.json> claude-opus   # 평가 지표

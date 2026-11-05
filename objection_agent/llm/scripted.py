@@ -35,11 +35,13 @@ class ScriptedAnalyzer:
         contradictions = []
         relation_claim = next((s for s in sentences if any(w in s for w in RELATION_WORDS)), None)
         if relation_claim and len(relation) == 0:
-            contradictions.append({
-                "claim": relation_claim,
-                "ledgerFact": "다툼 이전에 이 송금인과 오간 당행 거래가 없음",
-                "transactionNumbers": disputed_numbers,
-            })
+            contradictions.append(
+                {
+                    "claim": relation_claim,
+                    "ledgerFact": "다툼 이전에 이 송금인과 오간 당행 거래가 없음",
+                    "transactionNumbers": disputed_numbers,
+                }
+            )
 
         if len(relation) >= 3:
             branch, evidence = "NORMAL_ACCEPT", [i["transactionNumber"] for i in relation]
@@ -75,7 +77,9 @@ def _fraud_pattern(items: list[dict[str, Any]], disputed: list[dict[str, Any]]) 
         return []
     times = [_at(item["occurredAt"]) for item in disputed]
     start, end = min(times) - timedelta(hours=24), max(times) + timedelta(hours=24)
-    deposits = [i for i in items if i["direction"] == "IN" and i["amount"] >= 10_000 and start <= _at(i["occurredAt"]) <= end]
+    deposits = [
+        i for i in items if i["direction"] == "IN" and i["amount"] >= 10_000 and start <= _at(i["occurredAt"]) <= end
+    ]
     senders = {i["counterpartyKey"] or f"ext:{i['transactionNumber']}" for i in deposits}
     withdrawals = [i for i in items if i["direction"] == "OUT"]
     used, total, covered = [i["transactionNumber"] for i in deposits], 0, 0

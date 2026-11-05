@@ -1,0 +1,24 @@
+[project]
+name = "corebank-objection-agent"
+version = "0.1.0"
+description = "지급정지 이의제기 AI 심사 지원 Agent 워커와 평가"
+requires-python = ">=3.12,<3.13"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+# E/F 기본 오류, I import 정렬, B 버그 패턴, UP 최신 문법, S 보안(bandit), SIM 단순화
+select = ["E", "F", "I", "B", "UP", "S", "SIM"]
+# 줄 길이는 ruff format 이 맞춘다. 한국어 문자열 줄은 자르지 않는다
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+# 평가 스크립트는 로컬 docker 컨테이너에 SQL 을 보낸다(입력은 고정 문자열과 시나리오 파일)
+"eval/**" = ["S603", "S607", "S608"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
