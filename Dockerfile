@@ -6,6 +6,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# 증빙 서류 OCR(objection_agent/ocr.py): Tesseract 한국어, 영어 데이터와 PDF 쪽 변환용 poppler
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-kor poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --chmod=a=r requirements.txt .
 RUN pip install --require-hashes -r requirements.txt
