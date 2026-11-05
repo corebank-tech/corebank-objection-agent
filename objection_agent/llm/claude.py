@@ -48,7 +48,9 @@ class ClaudeAnalyzer:
         usage = Usage()
         model = self._model
 
-        fallback = {} if self._model.startswith(NO_FALLBACK_PREFIXES) else {"betas": [FALLBACK_BETA], "fallbacks": "default"}
+        fallback = (
+            {} if self._model.startswith(NO_FALLBACK_PREFIXES) else {"betas": [FALLBACK_BETA], "fallbacks": "default"}
+        )
         for _ in range(self._max_tool_turns + 1):
             response = self._client.beta.messages.create(
                 model=self._model,

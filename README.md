@@ -42,8 +42,13 @@ git-crypt unlock /path/to/git-crypt.key   # 키는 담당자에게 받는다. �
 ## 개발 규칙
 
 - 처음 한 번 `git config core.hooksPath .githooks` — 커밋 전에 gitleaks가 자격증명을 검사한다(`brew install gitleaks`). 서버 레포와 같은 훅이다.
-- 키는 `.env`(무시 대상)나 환경변수로만 둔다. 레포에 넣지 않는다.
-- `main`에 직접 push하지 않고 PR로 올린다. CI가 pytest, 평가 스크립트 컴파일, 저장된 평가 결과의 지표 재현, gitleaks를 돈다.
+- 키는 `.env`(무시 대상)나 환경변수로만 둔다. 레포에 넣지 않는다. 비밀값 다루는 법은 [SECURITY.md](SECURITY.md).
+- `main`은 보호돼 있다. PR(squash 병합)로만 바뀌고, CI 필수 검사가 통과해야 한다.
+  - `test`: 해시 검증 설치, ruff, pytest, 평가 시드와 정답 재현, 저장된 원자료로 지표 재현
+  - `image`: 이미지 빌드(잠금을 풀지 않음)
+  - `secrets`: 전체 이력 gitleaks
+  - `codeql`: Python과 GitHub Actions 보안 분석
+- 의존성, 액션, 기반 이미지 갱신은 Dependabot이 매주 PR로 올린다. 액션은 커밋 해시로 고정한다.
 - 서버 내부 API를 바꿔야 하면 corebank-server의 계약 문서와 구현을 먼저 고치고, 이 레포는 그 뒤에 맞춘다.
 
 ## 흐름
@@ -82,11 +87,18 @@ git-crypt unlock /path/to/git-crypt.key   # 키는 담당자에게 받는다. �
 
 ## 실행
 
+Python 3.12. 의존성은 해시를 고정한 `requirements.txt`(실행), `requirements-dev.txt`(개발)로 설치한다.
+
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest -q
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python --require-hashes -r requirements.txt -r requirements-dev.txt
+git config core.hooksPath .githooks          # 커밋 전 gitleaks
+git-crypt unlock /path/to/git-crypt.key      # 프롬프트와 평가 자료(암호화 파일)
+.venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q
 PAYMENT_STOP_WORKER_KEY=... .venv/bin/python -m objection_agent
-docker build -t objection-worker .   # 컨테이너로 돌릴 때
+docker build -t objection-worker .           # 잠금을 푼 작업 사본에서만. SECURITY.md
 ```
+
+의존성을 바꿀 때는 `requirements.in`, `requirements-dev.in`을 고치고 `uv pip compile <in> --python-version 3.12 --generate-hashes -o <txt>`로 잠근다.
 
 비용은 `costMicroUsd`(백만분의 1달러)로 판정안과 함께 서버에 남는다. 단가는 `llm/claude.py`의 `PRICE_MICRO_USD`다.

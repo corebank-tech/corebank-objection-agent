@@ -65,6 +65,6 @@ def test_step_starts_when_previous_step_ended():
 
     run_once(client(fake), ScriptedAnalyzer())
 
-    for previous, step in zip(fake.steps, fake.steps[1:]):
+    for previous, step in zip(fake.steps, fake.steps[1:], strict=False):
         assert step["startedAt"] >= previous["endedAt"]
         assert step["endedAt"] >= step["startedAt"]

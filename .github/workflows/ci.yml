@@ -5,38 +5,73 @@ on:
   push:
     branches: [main]
 
+# 기본 토큰은 읽기만. 필요한 작업만 따로 권한을 준다
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      # 프롬프트, 평가 시나리오, 원자료는 git-crypt 로 암호화돼 있다. 키는 저장소 Secret 에만 있다
+      # 액션은 태그가 아니라 커밋 해시로 고정한다(태그 바꿔치기 방지). 갱신은 Dependabot 이 PR 로 올린다
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # 프롬프트, 평가 시나리오, 원자료는 git-crypt 로 암호화돼 있다. 키는 저장소 Secret 에만 있다.
+      # 포크에서 온 PR 은 Secret 을 받지 못해 이 단계에서 멈춘다
       - name: git-crypt unlock
         env:
           GIT_CRYPT_KEY: ${{ secrets.GIT_CRYPT_KEY }}
         run: |
+          test -n "$GIT_CRYPT_KEY" || { echo "GIT_CRYPT_KEY 가 없습니다(포크 PR 이면 정상)"; exit 1; }
           sudo apt-get install -y -qq git-crypt
           echo "$GIT_CRYPT_KEY" | base64 -d > "$RUNNER_TEMP/git-crypt.key"
           git-crypt unlock "$RUNNER_TEMP/git-crypt.key"
           rm "$RUNNER_TEMP/git-crypt.key"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
+      - name: 의존성(해시 검증)
+        run: pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+      - name: 린트와 포맷
+        run: |
+          ruff check .
+          ruff format --check .
       - run: python -m pytest -q
-      # 평가 스크립트가 문법과 import 수준에서 깨지지 않았는지만 본다(실행에는 서버가 필요하다)
-      - run: python -m py_compile eval/scenarios.py eval/run_eval.py eval/analyze.py
-      # 저장된 평가 원자료로 지표를 다시 계산해 커밋된 metrics.json 과 같은지 본다
-      - run: |
+      - name: 평가 시드와 정답이 시나리오 정의에서 그대로 다시 만들어지는지
+        run: |
+          python -c "import sys; sys.path.insert(0, 'eval'); import scenarios; scenarios.build(name='/tmp/seed.sql', manifest_name='/tmp/manifest.json')"
+          diff /tmp/seed.sql eval/seed.sql
+          diff /tmp/manifest.json eval/manifest.json
+      - name: 저장된 평가 원자료로 지표를 다시 계산해 커밋된 값과 같은지
+        run: |
           cp docs/results/261105/results-all.json /tmp/results-all.json
           python eval/analyze.py /tmp/results-all.json claude-opus claude-sonnet claude-haiku scripted > /dev/null
           diff <(python -m json.tool /tmp/metrics.json) <(python -m json.tool docs/results/261105/metrics.json)
 
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # 이미지는 빌드만 확인하고 올리지 않는다. 암호화를 풀지 않은 채 빌드해서 프롬프트가 이미지에 들어가지 않는다
+      - name: docker build
+        run: docker build -t objection-worker:ci .
+
   secrets:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: gitleaks
+          persist-credentials: false
+      - name: gitleaks(전체 이력)
         run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --verbose --no-banner

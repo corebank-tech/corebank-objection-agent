@@ -1,0 +1,7 @@
+# 기본 담당
+*                       @danhandev
+# 보안에 직결되는 경로
+/.gitattributes         @danhandev
+/.github/               @danhandev
+/objection_agent/prompts.py @danhandev
+/SECURITY.md            @danhandev

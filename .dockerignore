@@ -1,0 +1,5 @@
+# 이미지에는 objection_agent 와 requirements.txt 만 들어간다. 키와 평가 자료가 빌드 컨텍스트로 넘어가지 않게 막는다
+*
+!requirements.txt
+!objection_agent/**
+**/__pycache__

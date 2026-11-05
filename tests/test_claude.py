@@ -49,20 +49,39 @@ def tool_use_response():
         name="get_ledger",
         input={"reason": "송금인과의 과거 거래 확인", "from": None, "to": None, "counterparty": "CP-0000000a"},
     )
-    return NS(stop_reason="tool_use", content=[NS(type="thinking", thinking=""), block], usage=usage(1000, 50, write=900), model="claude-opus-5-5")
+    return NS(
+        stop_reason="tool_use",
+        content=[NS(type="thinking", thinking=""), block],
+        usage=usage(1000, 50, write=900),
+        model="claude-opus-5-5",
+    )
 
 
 def final_response(draft=DRAFT):
-    return NS(stop_reason="end_turn", content=[NS(type="text", text=json.dumps(draft, ensure_ascii=False))], usage=usage(200, 300, read=900), model="claude-opus-5-5")
+    return NS(
+        stop_reason="end_turn",
+        content=[NS(type="text", text=json.dumps(draft, ensure_ascii=False))],
+        usage=usage(200, 300, read=900),
+        model="claude-opus-5-5",
+    )
 
 
 def test_tool_loop_records_tool_call_and_drops_unseen_evidence():
     client, messages = fake_client([tool_use_response(), final_response()])
     fake = FakeServer(relationship_ledger(), "친구에게 빌려준 돈입니다.")
 
-    run_once(ServerClient("http://core/api/v1", "key", transport=fake.transport()), ClaudeAnalyzer("claude-opus-5-5", "low", 8, client))
+    run_once(
+        ServerClient("http://core/api/v1", "key", transport=fake.transport()),
+        ClaudeAnalyzer("claude-opus-5-5", "low", 8, client),
+    )
 
-    assert [s["type"] for s in fake.steps] == ["CLAIMED", "CONTEXT_LOADED", "TOOL_CALL", "CLAIM_EXTRACTED", "DRAFT_SUBMITTED"]
+    assert [s["type"] for s in fake.steps] == [
+        "CLAIMED",
+        "CONTEXT_LOADED",
+        "TOOL_CALL",
+        "CLAIM_EXTRACTED",
+        "DRAFT_SUBMITTED",
+    ]
     draft = fake.drafts[0]
     # 도구가 돌려주지 않은 번호와 정상 갈래의 다툼 거래는 빠진다
     assert draft["evidenceTransactionNumbers"] == ["20991231WB0000000001", "20991231WB0000000002"]
@@ -88,7 +107,10 @@ def test_refusal_becomes_failed_step():
     client, _ = fake_client([refusal])
     fake = FakeServer(relationship_ledger(), "친구에게 빌려준 돈입니다.")
 
-    run_once(ServerClient("http://core/api/v1", "key", transport=fake.transport()), ClaudeAnalyzer("claude-opus-5-5", "low", 8, client))
+    run_once(
+        ServerClient("http://core/api/v1", "key", transport=fake.transport()),
+        ClaudeAnalyzer("claude-opus-5-5", "low", 8, client),
+    )
 
     assert fake.steps[-1]["type"] == "FAILED"
     assert fake.drafts == []
@@ -100,8 +122,16 @@ def test_tool_turn_limit():
 
     with pytest.raises(AnalysisRefused):
         analyzer.analyze(
-            {"clause": 1, "simplifiedRequested": False, "idCopyConfirmed": True, "litigationPending": False,
-             "ledgerFrom": "a", "ledgerTo": "b", "disputedTransfers": [], "statement": "s"},
+            {
+                "clause": 1,
+                "simplifiedRequested": False,
+                "idCopyConfirmed": True,
+                "litigationPending": False,
+                "ledgerFrom": "a",
+                "ledgerTo": "b",
+                "disputedTransfers": [],
+                "statement": "s",
+            },
             lambda *_: [],
             lambda _: None,
         )

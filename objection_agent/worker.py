@@ -138,7 +138,9 @@ def _draft_request(analysis: Analysis) -> dict[str, Any]:
         "noticeDraft": draft["noticeDraft"],
         "model": analysis.model[:60],
         "promptVersion": prompts.PROMPT_VERSION,
-        "inputTokens": analysis.usage.input_tokens + analysis.usage.cache_read_tokens + analysis.usage.cache_write_tokens,
+        "inputTokens": analysis.usage.input_tokens
+        + analysis.usage.cache_read_tokens
+        + analysis.usage.cache_write_tokens,
         "outputTokens": analysis.usage.output_tokens,
         "costMicroUsd": analysis.cost_micro_usd,
     }

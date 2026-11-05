@@ -1,18 +1,17 @@
 """이의제기 Agent 평가 실행. corebank-server 를 평가 전용 DB 에 띄운 로컬 환경에서 돈다(eval/README.md).
 
-  run_eval.py register   사건과 이의제기 접수(첫 분석이 대기열에 들어간다)
-  run_eval.py drive N    워커가 처리하는 동안 건마다 실행이 N회가 되도록 재분석을 요청한다
-  run_eval.py collect    결과 수집 → results.json
+run_eval.py register   사건과 이의제기 접수(첫 분석이 대기열에 들어간다)
+run_eval.py drive N    워커가 처리하는 동안 건마다 실행이 N회가 되도록 재분석을 요청한다
+run_eval.py collect    결과 수집 → results.json
 """
 
 import json
+import os
 import subprocess
 import sys
 import time
 import uuid
 from pathlib import Path
-
-import os
 
 import httpx
 
@@ -26,9 +25,24 @@ MANIFEST = json.loads((HERE / "manifest.json").read_text())
 
 def sql(query: str) -> list[str]:
     out = subprocess.run(
-        ["docker", "exec", MYSQL_CONTAINER, "mysql", "-uroot", f"-p{MYSQL_PASSWORD}", "minicore", "-N", "--raw",
-         "--default-character-set=utf8mb4", "-e", query],
-        capture_output=True, text=True, check=True).stdout
+        [
+            "docker",
+            "exec",
+            MYSQL_CONTAINER,
+            "mysql",
+            "-uroot",
+            f"-p{MYSQL_PASSWORD}",
+            "minicore",
+            "-N",
+            "--raw",
+            "--default-character-set=utf8mb4",
+            "-e",
+            query,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
     return [line for line in out.split("\n") if line.strip()]
 
 
@@ -39,12 +53,19 @@ class Admin:
 
     def login(self):
         r = self.http.post("/admin/auth/login", json={"userId": "adminoperator", "password": ADMIN_PASSWORD})
-        assert r.json()["code"] == "0000", r.text
+        if r.json()["code"] != "0000":
+            raise RuntimeError(f"관리자 로그인 실패: {r.text}")
 
     def post(self, path, body=None):
         for _ in range(2):
-            r = self.http.post(path, json=body, headers={
-                "X-XSRF-TOKEN": self.http.cookies.get("XSRF-TOKEN") or "", "Idempotency-Key": str(uuid.uuid4())})
+            r = self.http.post(
+                path,
+                json=body,
+                headers={
+                    "X-XSRF-TOKEN": self.http.cookies.get("XSRF-TOKEN") or "",
+                    "Idempotency-Key": str(uuid.uuid4()),
+                },
+            )
             if r.status_code == 401:
                 self.login()
                 continue
@@ -54,16 +75,35 @@ class Admin:
 
 def register():
     admin = Admin()
-    accounts = dict(row.split("\t") for row in sql("SELECT account_number, account_id FROM account WHERE account_number LIKE '0898%'"))
+    accounts = dict(
+        row.split("\t")
+        for row in sql("SELECT account_number, account_id FROM account WHERE account_number LIKE '0898%'")
+    )
     ids = {}
     for s in MANIFEST:
-        case = admin.post("/admin/payment-stops", {
-            "accountId": int(accounts[s["account"]]), "disputedTransactionNumbers": s["disputed"], "objectionDeadline": "2026-12-04"})
-        assert case["code"] == "0000", (s["id"], case)
-        objection = admin.post("/admin/objections", {
-            "caseId": case["data"]["caseId"], "clause": 1, "statement": s["statement"],
-            "simplifiedRequested": False, "idCopyConfirmed": True, "litigationPending": False})
-        assert objection["code"] == "0000", (s["id"], objection)
+        case = admin.post(
+            "/admin/payment-stops",
+            {
+                "accountId": int(accounts[s["account"]]),
+                "disputedTransactionNumbers": s["disputed"],
+                "objectionDeadline": "2026-12-04",
+            },
+        )
+        if case["code"] != "0000":
+            raise RuntimeError(f"사건 등록 실패 {s['id']}: {case}")
+        objection = admin.post(
+            "/admin/objections",
+            {
+                "caseId": case["data"]["caseId"],
+                "clause": 1,
+                "statement": s["statement"],
+                "simplifiedRequested": False,
+                "idCopyConfirmed": True,
+                "litigationPending": False,
+            },
+        )
+        if objection["code"] != "0000":
+            raise RuntimeError(f"이의제기 접수 실패 {s['id']}: {objection}")
         ids[s["id"]] = objection["data"]["objectionId"]
     (HERE / "objections.json").write_text(json.dumps(ids, indent=1))
     print("registered", len(ids))
@@ -73,8 +113,10 @@ def drive(target: int):
     admin = Admin()
     ids = json.loads((HERE / "objections.json").read_text())
     while True:
-        rows = sql("SELECT objection_id, COUNT(*), SUM(status IN ('COMPLETED','FAILED')), MAX(status IN ('QUEUED','RUNNING'))"
-                   " FROM agent_run GROUP BY objection_id")
+        rows = sql(
+            "SELECT objection_id, COUNT(*), SUM(status IN ('COMPLETED','FAILED')), MAX(status IN ('QUEUED','RUNNING'))"
+            " FROM agent_run GROUP BY objection_id"
+        )
         state = {int(r.split("\t")[0]): tuple(int(x or 0) for x in r.split("\t")[1:]) for r in rows}
         done = 0
         for oid in ids.values():
@@ -120,4 +162,6 @@ def collect():
 
 
 if __name__ == "__main__":
-    {"register": lambda: register(), "drive": lambda: drive(int(sys.argv[2])), "collect": lambda: collect()}[sys.argv[1]]()
+    {"register": lambda: register(), "drive": lambda: drive(int(sys.argv[2])), "collect": lambda: collect()}[
+        sys.argv[1]
+    ]()
