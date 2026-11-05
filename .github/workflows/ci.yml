@@ -10,6 +10,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 프롬프트, 평가 시나리오, 원자료는 git-crypt 로 암호화돼 있다. 키는 저장소 Secret 에만 있다
+      - name: git-crypt unlock
+        env:
+          GIT_CRYPT_KEY: ${{ secrets.GIT_CRYPT_KEY }}
+        run: |
+          sudo apt-get install -y -qq git-crypt
+          echo "$GIT_CRYPT_KEY" | base64 -d > "$RUNNER_TEMP/git-crypt.key"
+          git-crypt unlock "$RUNNER_TEMP/git-crypt.key"
+          rm "$RUNNER_TEMP/git-crypt.key"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

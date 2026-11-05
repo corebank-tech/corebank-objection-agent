@@ -1,0 +1,7 @@
+# git-crypt 로 암호화하는 경로. 키 없이는 바이너리로 보인다(README 「암호화 파일」).
+# 프롬프트, 공격 시험 문장이 든 시나리오, 소명과 모델 출력이 든 평가 원자료
+objection_agent/prompts.py filter=git-crypt diff=git-crypt
+eval/scenarios.py filter=git-crypt diff=git-crypt
+eval/manifest.json filter=git-crypt diff=git-crypt
+eval/private/** filter=git-crypt diff=git-crypt
+docs/results/**/results-*.json filter=git-crypt diff=git-crypt

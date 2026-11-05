@@ -26,6 +26,19 @@ PR #919가 dev에 머지되기 전에는 [브랜치의 계약 문서](https://gi
 
 평가 시드(`eval/seed.sql`)는 서버 Flyway `V202611051600`까지의 `customer`, `account`, `transfer`, `ledger_entry` 컬럼을 가정한다. 서버에서 이 테이블이 바뀌면 시드를 다시 만든다.
 
+## 암호화 파일
+
+프롬프트(`objection_agent/prompts.py`), 평가 시나리오와 정답(`eval/scenarios.py`, `eval/manifest.json`, `eval/private/`), 평가 원자료(`docs/results/**/results-*.json`)는
+[git-crypt](https://github.com/AGWA/git-crypt)로 암호화돼 있다. 키 없이 클론하면 이 파일들은 바이너리로 보이고 워커와 평가를 실행할 수 없다.
+코드, 평가 스크립트, 지표(`metrics.json`)와 보고서는 공개다.
+
+```bash
+brew install git-crypt
+git-crypt unlock /path/to/git-crypt.key   # 키는 담당자에게 받는다. 레포에 넣지 않는다
+```
+
+암호화 대상은 `.gitattributes`가 정한다. 새 민감 파일(공격 시나리오 등)은 `eval/private/` 아래에 둔다. 커밋 전에 `git-crypt status -e`로 암호화 여부를 확인한다.
+
 ## 개발 규칙
 
 - 처음 한 번 `git config core.hooksPath .githooks` — 커밋 전에 gitleaks가 자격증명을 검사한다(`brew install gitleaks`). 서버 레포와 같은 훅이다.
