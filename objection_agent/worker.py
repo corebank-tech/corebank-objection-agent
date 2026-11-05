@@ -67,8 +67,8 @@ def run_once(server: ServerClient, analyzer: Analyzer, step_delay: float = 0.0) 
             )
 
         analysis = analyzer.analyze(context, ledger, on_tool_call)
-        _keep_seen(analysis.draft, seen, tainted)
-        _record_findings(steps, analysis)
+        dropped = _keep_seen(analysis.draft, seen, tainted)
+        _record_findings(steps, analysis, dropped)
         result = server.submit_draft(token, objection_id, _draft_request(analysis))
         log.info("판정안 제출 runId=%s agent=%s gate=%s", run_id, result["agentBranch"], result["gateBranch"])
     except ServerError as exc:
@@ -82,16 +82,25 @@ def run_once(server: ServerClient, analyzer: Analyzer, step_delay: float = 0.0) 
     return True
 
 
-def _keep_seen(draft: dict[str, Any], seen: set[str], tainted: set[str]) -> None:
+def _keep_seen(draft: dict[str, Any], seen: set[str], tainted: set[str]) -> dict[str, list[str]]:
+    """걸러 낸 번호를 돌려준다. unseen 은 조회하지 않은 번호(지어냈을 가능성), tainted 는 정상 근거로 쓸 수 없는 번호다."""
     excluded = tainted if draft["branch"] in ("NORMAL_ACCEPT", "NORMAL_PARTIAL") else set()
+    referenced = list(draft["evidenceTransactionNumbers"])
+    for item in draft["contradictions"]:
+        referenced += item["transactionNumbers"]
+    dropped = {
+        "unseen": sorted({n for n in referenced if n not in seen}),
+        "tainted": sorted({n for n in draft["evidenceTransactionNumbers"] if n in seen and n in excluded}),
+    }
     draft["evidenceTransactionNumbers"] = [
         n for n in draft["evidenceTransactionNumbers"] if n in seen and n not in excluded
     ]
     for item in draft["contradictions"]:
         item["transactionNumbers"] = [n for n in item["transactionNumbers"] if n in seen]
+    return dropped
 
 
-def _record_findings(steps: StepRecorder, analysis: Analysis) -> None:
+def _record_findings(steps: StepRecorder, analysis: Analysis, dropped: dict[str, list[str]]) -> None:
     draft = analysis.draft
     if draft["claims"]:
         steps.record(
@@ -112,6 +121,7 @@ def _record_findings(steps: StepRecorder, analysis: Analysis) -> None:
             "missingDocuments": draft["missingDocuments"],
             "model": analysis.model,
             "costMicroUsd": analysis.cost_micro_usd,
+            "droppedTransactionNumbers": dropped,
         },
     )
 

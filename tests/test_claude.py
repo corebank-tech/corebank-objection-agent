@@ -66,6 +66,8 @@ def test_tool_loop_records_tool_call_and_drops_unseen_evidence():
     draft = fake.drafts[0]
     # 도구가 돌려주지 않은 번호와 정상 갈래의 다툼 거래는 빠진다
     assert draft["evidenceTransactionNumbers"] == ["20991231WB0000000001", "20991231WB0000000002"]
+    dropped = fake.steps[-1]["detail"]["droppedTransactionNumbers"]
+    assert dropped == {"unseen": ["20991231WB9999999999"], "tainted": [DISPUTED]}
     assert draft["inputTokens"] == 1000 + 200 + 900 + 900
     assert draft["costMicroUsd"] == cost_micro_usd(Usage(1200, 350, 900, 900))
 

@@ -10,19 +10,28 @@ import anthropic
 from objection_agent import prompts
 from objection_agent.llm.port import Analysis, AnalysisRefused, LedgerFn, ToolCall, ToolCallback, Usage
 
-# 백만 토큰당 달러 = 토큰당 백만분의 1달러. Opus 5.5 기준(입력 4, 출력 20, 캐시 읽기 0.2, 5분 캐시 쓰기 5)
-PRICE_MICRO_USD = {"input": 4.0, "output": 20.0, "cache_read": 0.2, "cache_write": 5.0}
+# 백만 토큰당 달러 = 토큰당 백만분의 1달러(입력, 출력, 캐시 읽기, 5분 캐시 쓰기). Haiku 는 프롬프트 100K 이하 단가
+PRICES_MICRO_USD = {
+    "claude-opus-5-5": {"input": 4.0, "output": 20.0, "cache_read": 0.2, "cache_write": 5.0},
+    "claude-sonnet-5-5": {"input": 2.0, "output": 10.0, "cache_read": 0.2, "cache_write": 2.5},
+    "claude-haiku-5-5": {"input": 0.1, "output": 0.5, "cache_read": 0.01, "cache_write": 0.125},
+}
+PRICE_MICRO_USD = PRICES_MICRO_USD["claude-opus-5-5"]
+
+# 서버 쪽 fallback 이 없는 모델(Haiku 5.5)에는 보내지 않는다
+NO_FALLBACK_PREFIXES = ("claude-haiku",)
 
 # 안전 분류기가 거절하면 서버가 권장 모델로 다시 돌린다
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
-def cost_micro_usd(usage: Usage) -> int:
+def cost_micro_usd(usage: Usage, model: str = "claude-opus-5-5") -> int:
+    price = PRICES_MICRO_USD.get(model, PRICE_MICRO_USD)
     return round(
-        usage.input_tokens * PRICE_MICRO_USD["input"]
-        + usage.output_tokens * PRICE_MICRO_USD["output"]
-        + usage.cache_read_tokens * PRICE_MICRO_USD["cache_read"]
-        + usage.cache_write_tokens * PRICE_MICRO_USD["cache_write"]
+        usage.input_tokens * price["input"]
+        + usage.output_tokens * price["output"]
+        + usage.cache_read_tokens * price["cache_read"]
+        + usage.cache_write_tokens * price["cache_write"]
     )
 
 
@@ -31,13 +40,15 @@ class ClaudeAnalyzer:
         self._model = model
         self._effort = effort
         self._max_tool_turns = max_tool_turns
-        self._client = client or anthropic.Anthropic()
+        # 새 계정은 분당 한도가 낮아 429 가 잦다. SDK 재시도 간격(지수 백오프)에 맡긴다
+        self._client = client or anthropic.Anthropic(max_retries=6)
 
     def analyze(self, context: dict[str, Any], ledger: LedgerFn, on_tool_call: ToolCallback) -> Analysis:
         messages: list[dict[str, Any]] = [{"role": "user", "content": prompts.user_message(context)}]
         usage = Usage()
         model = self._model
 
+        fallback = {} if self._model.startswith(NO_FALLBACK_PREFIXES) else {"betas": [FALLBACK_BETA], "fallbacks": "default"}
         for _ in range(self._max_tool_turns + 1):
             response = self._client.beta.messages.create(
                 model=self._model,
@@ -48,9 +59,8 @@ class ClaudeAnalyzer:
                     "effort": self._effort,
                     "format": {"type": "json_schema", "schema": prompts.DRAFT_SCHEMA},
                 },
-                betas=[FALLBACK_BETA],
-                fallbacks="default",
                 messages=messages,
+                **fallback,
             )
             usage.add(_usage(response.usage))
             model = response.model or model
@@ -77,7 +87,7 @@ class ClaudeAnalyzer:
                 draft = json.loads(text)
             except json.JSONDecodeError as exc:
                 raise AnalysisRefused("판정안 형식이 맞지 않음") from exc
-            return Analysis(draft=draft, model=model, usage=usage, cost_micro_usd=cost_micro_usd(usage))
+            return Analysis(draft=draft, model=model, usage=usage, cost_micro_usd=cost_micro_usd(usage, self._model))
 
         raise AnalysisRefused(f"도구 호출이 {self._max_tool_turns}회를 넘음")
 
