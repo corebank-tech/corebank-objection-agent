@@ -13,7 +13,7 @@
 PR #919가 dev에 머지되기 전에는 [브랜치의 계약 문서](https://github.com/corebank-tech/corebank-server/blob/feat/paymentstop-agent-api/docs/phase2/objection_agent_contract.md)를 본다.
 계약을 바꿀 때는 서버 정본을 먼저 고친다.
 
-평가 결과(11/5): [성과 수치](docs/results/261105/performance.md), [평가 보고서](docs/results/261105/evaluation.md).
+평가 결과(11/5): [성과 수치](docs/results/261105/performance.md), [평가 보고서](docs/results/261105/evaluation.md). 프롬프트 `objection-v1`(서류 입력 전) 기준이다.
 
 ## 호환 버전
 
@@ -21,7 +21,8 @@ PR #919가 dev에 머지되기 전에는 [브랜치의 계약 문서](https://gi
 
 | 이 레포 | corebank-server | 비고 |
 |---|---|---|
-| `main` | PR #919 `feat/paymentstop-agent-api` 커밋 `821286f9` 이후 | 내부 API 계약 `docs/phase2/objection_agent_contract.md` |
+| `main` | contract-v2 내부 API(서류 목록과 내용, OCR 저장, 외부 확인 조회)를 구현한 서버 | 서류 OCR과 외부 확인 도구를 쓴다. 새 필드(`documents`, `externalChecks`, `supplementRound`, `missingDocumentsRequested`)는 선택이라 PR #919 커밋 `821286f9` 이후의 옛 서버와도 돈다. 옛 서버면 서류 단계와 외부 확인 도구 없이 지금처럼 분석한다 |
+| `4a9ee66` | PR #919 `feat/paymentstop-agent-api` 커밋 `821286f9` 이후 | 서류 OCR 전. 내부 API 계약 `docs/phase2/objection_agent_contract.md` |
 | `5abdf2d` + 프롬프트 | 위와 같음 | 11/6 시연 환경에 올라간 워커. 프롬프트는 이후 바뀌지 않았다(암호화 커밋 `d90248d`의 `prompts.py`와 같다) |
 
 11/5에 두 레포 모두 이력을 다시 써서(민감 파일 정리) 그 전의 커밋 해시는 쓰지 않는다.
@@ -57,12 +58,23 @@ git-crypt unlock /path/to/git-crypt.key   # 키는 담당자에게 받는다. �
 
 1. `POST /internal/review-jobs/claim`으로 작업과 작업 토큰을 받는다. `CLAIMED`
 2. 가명 처리한 소명과 다툼 거래를 읽는다. `CONTEXT_LOADED`
-3. 분석기가 `get_ledger` 도구로 원장을 조회한다. 부를 때마다 `TOOL_CALL`
-4. 주장과 모순을 남긴다. `CLAIM_EXTRACTED`, `CONTRADICTION`
-5. 판정안을 낸다. `DRAFT_SUBMITTED`. 서버가 게이트를 다시 계산해 `GATE_EVALUATED`를 남긴다
-6. 오류가 나면 `FAILED`를 남긴다. 시도가 남아 있으면 서버가 대기열로 돌린다
+3. 글자를 아직 읽지 않은 증빙(`ocrStatus != DONE`)을 내려받아 로컬에서 OCR하고 서버에 올린다. 서류마다 `OCR`.
+   서버가 가명 처리한 글자를 받으려고 context를 다시 읽는다. 서류 하나를 못 읽으면 그 `OCR` 단계에 실패로 남기고 다음으로 넘어간다
+4. 분석기가 `get_ledger` 도구로 원장을, `get_external_checks` 도구로 외부 확인 회신을 조회한다. 부를 때마다 `TOOL_CALL`
+5. 주장과 모순을 남긴다. `CLAIM_EXTRACTED`, `CONTRADICTION`. 주장마다 출처(`source`: `STATEMENT` 또는 `DOCUMENT`, 서류면 `documentId`, `regionIndex`)를 붙인다
+6. 판정안을 낸다. `DRAFT_SUBMITTED`. 서버가 게이트를 다시 계산해 `GATE_EVALUATED`를 남긴다
+7. 오류가 나면 `FAILED`를 남긴다. 시도가 남아 있으면 서버가 대기열로 돌린다
 
-판정안 근거 거래번호는 분석기가 실제로 조회한 번호로만 걸러서 낸다.
+판정안 근거 거래번호는 분석기가 실제로 조회한 번호로만 걸러서 낸다. 주장의 `documentId`, `regionIndex`도 분석기에 준 서류와 영역이 아니면 비운다.
+
+## 서류 OCR
+
+- 증빙(`EVIDENCE`)만 읽는다. 신분증 사본은 서버가 내부 API로 주지 않고, 워커도 증빙이 아닌 서류는 내려받거나 분석에 넣지 않는다(D37).
+- 원본 이미지는 LLM에 보내지 않는다. 워커가 읽은 글자를 서버에 올리면 서버가 가명 처리해 저장하고, 분석에는 그 가명 처리한 줄만 들어간다.
+- 서류 내용은 주장이다. 원장 사실이 아니고 위조됐을 수 있어 근거 거래번호가 되지 않는다(D9). 금액이나 이체 일자가 다툼 거래와 다르면 모순으로 남긴다.
+- 엔진은 Tesseract CLI(`kor+eng`, TSV 출력으로 줄 단위 영역, 상자, 신뢰도)이고, PDF는 poppler `pdftoppm`으로 쪽 이미지로 바꿔 읽는다. 신뢰도 0.85 미만 영역 수를 `OCR` 단계에 함께 남긴다(D40).
+- 로컬 설치: `brew install tesseract tesseract-lang poppler`(macOS), `apt install tesseract-ocr tesseract-ocr-kor poppler-utils`(Debian). 이미지에는 들어 있다.
+  설치하지 않으면 서류마다 `OCR` 실패 단계가 남고 분석은 이어진다. 실제 tesseract 시험은 바이너리가 있을 때만 돈다.
 
 ## 분석기
 
@@ -84,6 +96,9 @@ git-crypt unlock /path/to/git-crypt.key   # 키는 담당자에게 받는다. �
 | `AGENT_POLL_SECONDS` | `2` | 대기열이 비었을 때 다시 볼 간격 |
 | `AGENT_STEP_DELAY_SECONDS` | `0` | 단계 사이 간격. 시연에서 타임라인이 한 줄씩 보이게 할 때 쓴다 |
 | `AGENT_MAX_TOOL_TURNS` | `8` | 도구 호출 상한 |
+| `AGENT_OCR` | `tesseract` | `tesseract` 또는 `off`(서류 글자 인식을 건너뛴다) |
+| `AGENT_OCR_LANG` | `kor+eng` | Tesseract 언어 |
+| `AGENT_OCR_MAX_PAGES` | `10` | PDF 한 건에서 읽는 최대 쪽 수 |
 
 서버는 `PAYMENT_STOP_AGENT_ENABLED=true`와 같은 `PAYMENT_STOP_WORKER_KEY`로 띄운다. 킬스위치가 꺼져 있으면 작업이 오지 않는다.
 

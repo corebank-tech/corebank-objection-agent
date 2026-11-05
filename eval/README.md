@@ -31,3 +31,22 @@ eval/run_round.sh scripted 6 1 results-all.json
 11/5 실행에서 Opus 72회와 비교 72회에 $3.40이 들었다.
 
 데이터 확인: 분석을 돌리기 전에 관리자 상세 API의 해제 게이트 결과가 시나리오마다 `expected_gate`와 같은지 본다. 다르면 시드가 의도와 다르게 만들어진 것이다.
+
+## 합성 증빙 서류(PA-13)
+
+`documents.py`는 시연과 평가용 증빙 PNG를 Pillow로 그린다(개발 의존성). 내용은 전부 가상이고 모든 장에 「시연용 견본」을 찍는다. 신분증 사본은 만들지 않는다.
+
+```bash
+.venv/bin/python eval/documents.py                                  # eval/documents/*.png (커밋하지 않는다)
+.venv/bin/python eval/documents.py --amount 300000 --date 2026-11-05 --out /tmp/docs
+```
+
+| 파일 | 내용 |
+|---|---|
+| `loan_contract.png` | 금전 소비대차 계약서. 매월 상환액이 다툼 거래 금액과 같다 |
+| `transfer_receipt.png` | 이체 확인증. 이체 일시와 금액이 다툼 거래와 같다 |
+| `used_goods_receipt.png` | 중고 물품 거래 영수증. 거래일과 판매금액이 다툼 거래와 같다 |
+| `forged_receipt.png` | 위조 이체 확인증. 금액(10배)과 이체 일자(8일 전)가 원장과 어긋난다. Agent는 모순으로, 게이트는 수용을 막아야 한다 |
+
+한국어 글꼴이 필요하다. macOS 기본 글꼴(`AppleSDGothicNeo`)이나 Linux `fonts-nanum`을 찾고, 다른 글꼴은 `EVAL_DOCUMENT_FONT`로 준다. 없으면 오류로 멈춘다.
+기존 24건 시나리오(`scenarios.py`, `seed.sql`, `manifest.json`)는 바꾸지 않았다. 서류는 관리자 업로드 API로 이의제기에 붙인다.

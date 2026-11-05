@@ -1,4 +1,4 @@
-"""Claude 분석기. 원장 조회 도구 하나로 직접 도구 루프를 돌고, 마지막 답은 구조화 출력(JSON 스키마)으로 받는다."""
+"""Claude 분석기. 원장 조회와 외부 확인 회신 조회 도구로 직접 도구 루프를 돌고, 마지막 답은 구조화 출력(JSON 스키마)으로 받는다."""
 
 from __future__ import annotations
 
@@ -8,7 +8,16 @@ from typing import Any
 import anthropic
 
 from objection_agent import prompts
-from objection_agent.llm.port import Analysis, AnalysisRefused, LedgerFn, ToolCall, ToolCallback, Usage
+from objection_agent.llm.port import (
+    EXTERNAL_CHECKS_TOOL_NAME,
+    Analysis,
+    AnalysisRefused,
+    ExternalChecksFn,
+    LedgerFn,
+    ToolCall,
+    ToolCallback,
+    Usage,
+)
 
 # 백만 토큰당 달러 = 토큰당 백만분의 1달러(입력, 출력, 캐시 읽기, 5분 캐시 쓰기). Haiku 는 프롬프트 100K 이하 단가
 PRICES_MICRO_USD = {
@@ -43,10 +52,18 @@ class ClaudeAnalyzer:
         # 새 계정은 분당 한도가 낮아 429 가 잦다. SDK 재시도 간격(지수 백오프)에 맡긴다
         self._client = client or anthropic.Anthropic(max_retries=6)
 
-    def analyze(self, context: dict[str, Any], ledger: LedgerFn, on_tool_call: ToolCallback) -> Analysis:
+    def analyze(
+        self,
+        context: dict[str, Any],
+        ledger: LedgerFn,
+        on_tool_call: ToolCallback,
+        external_checks: ExternalChecksFn | None = None,
+    ) -> Analysis:
         messages: list[dict[str, Any]] = [{"role": "user", "content": prompts.user_message(context)}]
         usage = Usage()
         model = self._model
+        # 외부 확인 API 가 없는 옛 서버면 도구를 주지 않는다
+        tools = [prompts.LEDGER_TOOL] + ([prompts.EXTERNAL_CHECKS_TOOL] if external_checks is not None else [])
 
         fallback = (
             {} if self._model.startswith(NO_FALLBACK_PREFIXES) else {"betas": [FALLBACK_BETA], "fallbacks": "default"}
@@ -56,7 +73,7 @@ class ClaudeAnalyzer:
                 model=self._model,
                 max_tokens=16000,
                 system=[{"type": "text", "text": prompts.SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-                tools=[prompts.LEDGER_TOOL],
+                tools=tools,
                 output_config={
                     "effort": self._effort,
                     "format": {"type": "json_schema", "schema": prompts.DRAFT_SCHEMA},
@@ -80,7 +97,7 @@ class ClaudeAnalyzer:
                 for block in response.content:
                     if block.type != "tool_use":
                         continue
-                    results.append(_run_tool(block, ledger, on_tool_call))
+                    results.append(_run_tool(block, ledger, external_checks, on_tool_call))
                 messages.append({"role": "user", "content": results})
                 continue
 
@@ -94,14 +111,21 @@ class ClaudeAnalyzer:
         raise AnalysisRefused(f"도구 호출이 {self._max_tool_turns}회를 넘음")
 
 
-def _run_tool(block: Any, ledger: LedgerFn, on_tool_call: ToolCallback) -> dict[str, Any]:
+def _run_tool(
+    block: Any, ledger: LedgerFn, external_checks: ExternalChecksFn | None, on_tool_call: ToolCallback
+) -> dict[str, Any]:
     args = dict(block.input)
     reason = str(args.pop("reason", ""))
     try:
-        items = ledger(args.get("from"), args.get("to"), args.get("counterparty"))
+        if block.name == EXTERNAL_CHECKS_TOOL_NAME:
+            if external_checks is None:
+                raise ValueError("이 서버는 외부 확인 조회를 지원하지 않음")
+            items = external_checks()
+        else:
+            items = ledger(args.get("from"), args.get("to"), args.get("counterparty"))
     except Exception as exc:  # 조회 실패는 모델에 알려 다른 조회를 고르게 한다
         return {"type": "tool_result", "tool_use_id": block.id, "content": f"조회 실패: {exc}", "is_error": True}
-    on_tool_call(ToolCall(reason=reason, args={k: v for k, v in args.items() if v}, result=items))
+    on_tool_call(ToolCall(reason=reason, args={k: v for k, v in args.items() if v}, result=items, tool=block.name))
     return {
         "type": "tool_result",
         "tool_use_id": block.id,

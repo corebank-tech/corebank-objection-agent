@@ -9,12 +9,19 @@ from typing import Any, Protocol
 # 원장 조회 함수: (from, to, counterparty) -> 원장 항목 목록
 LedgerFn = Callable[[str | None, str | None, str | None], list[dict[str, Any]]]
 
+# 외부 확인 회신 조회 함수: () -> [{agency, status, reply}]. 서버가 이 API 를 모르면(옛 계약) None 을 넘긴다
+ExternalChecksFn = Callable[[], list[dict[str, Any]]]
+
+LEDGER_TOOL_NAME = "get_ledger"
+EXTERNAL_CHECKS_TOOL_NAME = "get_external_checks"
+
 
 @dataclass
 class ToolCall:
     reason: str
     args: dict[str, Any]
     result: list[dict[str, Any]]
+    tool: str = LEDGER_TOOL_NAME
 
 
 # 도구를 부를 때마다 워커가 TOOL_CALL 단계를 남기도록 알린다
@@ -48,4 +55,10 @@ class AnalysisRefused(RuntimeError):
 
 
 class Analyzer(Protocol):
-    def analyze(self, context: dict[str, Any], ledger: LedgerFn, on_tool_call: ToolCallback) -> Analysis: ...
+    def analyze(
+        self,
+        context: dict[str, Any],
+        ledger: LedgerFn,
+        on_tool_call: ToolCallback,
+        external_checks: ExternalChecksFn | None = None,
+    ) -> Analysis: ...

@@ -6,3 +6,4 @@ eval/results*.json
 eval/objections.json
 eval/timing_*.sql
 eval/timing_manifest_*.json
+eval/documents/*.png
