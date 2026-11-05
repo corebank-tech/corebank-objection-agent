@@ -1,9 +1,19 @@
-# 이의제기 Agent 워커
+# corebank-objection-agent
 
-지급정지 이의제기 AI 심사 지원(D-36, PA-06)의 워커다. 서버 대기열에서 분석을 가져가 소명과 원장을 대조하고,
-단계 이벤트를 남기며 판정안을 낸다. 해제와 판정 확정 권한은 없다. 서버 계약은
-[objection_agent_contract.md](../../docs/phase2/objection_agent_contract.md), 단계 이벤트는
-[agent_run_step_schema.md](../../docs/phase2/agent_run_step_schema.md)다.
+지급정지 이의제기 AI 심사 지원(D-36)의 Agent 워커와 평가. 서버 대기열에서 분석을 가져가 소명과 원장을 대조하고,
+단계 이벤트를 남기며 판정안을 낸다. 해제와 판정 확정 권한은 없다. 해제는 서버의 해제 게이트와 담당자가 정한다.
+
+| 위치 | 내용 |
+|---|---|
+| [corebank-server](https://github.com/corebank-tech/corebank-server) | 지급정지 도메인, 해제 게이트, 내부 API, 분석 대기열(PR #919). **계약 정본** |
+| [corebank-fe](https://github.com/corebank-tech/corebank-fe) | 관리자 심사 화면과 실행 타임라인(PR #213) |
+| 이 레포 | 워커(`objection_agent/`), 평가(`eval/`), 평가 결과(`docs/results/`) |
+
+서버 계약은 corebank-server의 `docs/phase2/objection_agent_contract.md`, 단계 이벤트는 `docs/phase2/agent_run_step_schema.md`가 정본이다.
+PR #919가 dev에 머지되기 전에는 [브랜치의 계약 문서](https://github.com/corebank-tech/corebank-server/blob/feat/paymentstop-agent-api/docs/phase2/objection_agent_contract.md)를 본다.
+계약을 바꿀 때는 서버 정본을 먼저 고친다.
+
+평가 결과(11/5): [성과 수치](docs/results/261105/performance.md), [평가 보고서](docs/results/261105/evaluation.md).
 
 ## 흐름
 
@@ -45,6 +55,7 @@
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m pytest -q
 PAYMENT_STOP_WORKER_KEY=... .venv/bin/python -m objection_agent
+docker build -t objection-worker .   # 컨테이너로 돌릴 때
 ```
 
 비용은 `costMicroUsd`(백만분의 1달러)로 판정안과 함께 서버에 남는다. 단가는 `llm/claude.py`의 `PRICE_MICRO_USD`다.

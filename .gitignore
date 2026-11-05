@@ -2,3 +2,7 @@
 __pycache__/
 .pytest_cache/
 *.env
+eval/results*.json
+eval/objections.json
+eval/timing_*.sql
+eval/timing_manifest_*.json
