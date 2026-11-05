@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from objection_agent.server import ServerClient
+
+# 서버 시각은 KST 로컬 시각이다. 워커가 도는 곳(컨테이너는 UTC)과 무관하게 KST 로 찍는다
+KST = timezone(timedelta(hours=9))
+
+
+def now_kst() -> datetime:
+    return datetime.now(KST).replace(tzinfo=None)
 
 
 class StepRecorder:
@@ -17,7 +24,7 @@ class StepRecorder:
         self._seq = next_seq
         self._delay = delay_seconds
         # 단계의 시작은 앞 단계가 끝난 때다. 모델이 생각하고 도구를 고른 시간이 그 단계의 소요 시간으로 보인다
-        self._last_end = datetime.now()
+        self._last_end = now_kst()
 
     def record(
         self,
@@ -28,7 +35,7 @@ class StepRecorder:
         status: str = "DONE",
         started_at: datetime | None = None,
     ) -> None:
-        now = datetime.now()
+        now = now_kst()
         self._server.record_step(
             self._token,
             self._run_id,
@@ -46,4 +53,4 @@ class StepRecorder:
         self._seq += 1
         if self._delay:
             time.sleep(self._delay)
-        self._last_end = datetime.now()
+        self._last_end = now_kst()
