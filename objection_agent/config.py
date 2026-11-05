@@ -16,6 +16,9 @@ class Config:
     poll_seconds: float
     step_delay_seconds: float  # 시연에서 타임라인이 한 줄씩 보이도록 단계 사이에 두는 간격
     max_tool_turns: int
+    ocr: str = "tesseract"  # "tesseract" 는 로컬 Tesseract CLI, "off" 는 서류 글자 인식을 건너뛴다
+    ocr_lang: str = "kor+eng"
+    ocr_max_pages: int = 10  # PDF 한 건에서 읽는 최대 쪽 수
 
     @staticmethod
     def from_env() -> Config:
@@ -28,4 +31,7 @@ class Config:
             poll_seconds=float(os.environ.get("AGENT_POLL_SECONDS", "2")),
             step_delay_seconds=float(os.environ.get("AGENT_STEP_DELAY_SECONDS", "0")),
             max_tool_turns=int(os.environ.get("AGENT_MAX_TOOL_TURNS", "8")),
+            ocr=os.environ.get("AGENT_OCR", "tesseract"),
+            ocr_lang=os.environ.get("AGENT_OCR_LANG", "kor+eng"),
+            ocr_max_pages=int(os.environ.get("AGENT_OCR_MAX_PAGES", "10")),
         )
