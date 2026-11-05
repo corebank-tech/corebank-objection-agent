@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q
+      # 평가 스크립트가 문법과 import 수준에서 깨지지 않았는지만 본다(실행에는 서버가 필요하다)
+      - run: python -m py_compile eval/scenarios.py eval/run_eval.py eval/analyze.py
+      # 저장된 평가 원자료로 지표를 다시 계산해 커밋된 metrics.json 과 같은지 본다
+      - run: |
+          cp docs/results/261105/results-all.json /tmp/results-all.json
+          python eval/analyze.py /tmp/results-all.json claude-opus claude-sonnet claude-haiku scripted > /dev/null
+          diff <(python -m json.tool /tmp/metrics.json) <(python -m json.tool docs/results/261105/metrics.json)
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --verbose --no-banner

@@ -1,0 +1,26 @@
+#!/bin/sh
+# 스테이징된 변경에 자격증명이 섞였는지 커밋 전에 검사한다.
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "[pre-commit] gitleaks가 설치돼 있지 않습니다. 'brew install gitleaks' 후 다시 시도하세요."
+    exit 1
+fi
+
+gitleaks_bin=$(command -v gitleaks)
+gitleaks_version=$(gitleaks version 2>/dev/null)
+case "$gitleaks_version" in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *)
+        echo "[pre-commit] 의심스러운 gitleaks 바이너리입니다: $gitleaks_bin ($gitleaks_version)"
+        echo "[pre-commit] PATH에서 공식 gitleaks가 먼저 잡히는지 확인하세요."
+        exit 1
+        ;;
+esac
+echo "[pre-commit] gitleaks 사용: $gitleaks_bin ($gitleaks_version)"
+
+if ! gitleaks git --staged --redact --verbose --no-banner; then
+    echo ""
+    echo "[pre-commit] 민감 정보가 감지되었습니다. 커밋이 차단됩니다."
+    echo "[pre-commit] 값을 환경변수로 옮기고 스테이징에서 제외한 뒤 다시 커밋하세요."
+    exit 1
+fi

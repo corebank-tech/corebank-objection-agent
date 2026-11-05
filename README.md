@@ -15,6 +15,24 @@ PR #919가 dev에 머지되기 전에는 [브랜치의 계약 문서](https://gi
 
 평가 결과(11/5): [성과 수치](docs/results/261105/performance.md), [평가 보고서](docs/results/261105/evaluation.md).
 
+## 호환 버전
+
+서버와 레포가 나뉘어 있어 맞는 조합을 여기 적는다. 서버 내부 API 계약이 바뀌면 이 표를 함께 고친다.
+
+| 이 레포 | corebank-server | 비고 |
+|---|---|---|
+| `main` | PR #919 `feat/paymentstop-agent-api` 커밋 `23cc5067` 이후 | 내부 API 계약 `docs/phase2/objection_agent_contract.md` |
+| `aa72a65` | 위와 같음 | 11/6 시연 환경에 올라간 워커 |
+
+평가 시드(`eval/seed.sql`)는 서버 Flyway `V202611051600`까지의 `customer`, `account`, `transfer`, `ledger_entry` 컬럼을 가정한다. 서버에서 이 테이블이 바뀌면 시드를 다시 만든다.
+
+## 개발 규칙
+
+- 처음 한 번 `git config core.hooksPath .githooks` — 커밋 전에 gitleaks가 자격증명을 검사한다(`brew install gitleaks`). 서버 레포와 같은 훅이다.
+- 키는 `.env`(무시 대상)나 환경변수로만 둔다. 레포에 넣지 않는다.
+- `main`에 직접 push하지 않고 PR로 올린다. CI가 pytest, 평가 스크립트 컴파일, 저장된 평가 결과의 지표 재현, gitleaks를 돈다.
+- 서버 내부 API를 바꿔야 하면 corebank-server의 계약 문서와 구현을 먼저 고치고, 이 레포는 그 뒤에 맞춘다.
+
 ## 흐름
 
 1. `POST /internal/review-jobs/claim`으로 작업과 작업 토큰을 받는다. `CLAIMED`
