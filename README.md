@@ -21,8 +21,10 @@ PR #919가 dev에 머지되기 전에는 [브랜치의 계약 문서](https://gi
 
 | 이 레포 | corebank-server | 비고 |
 |---|---|---|
-| `main` | PR #919 `feat/paymentstop-agent-api` 커밋 `23cc5067` 이후 | 내부 API 계약 `docs/phase2/objection_agent_contract.md` |
-| `aa72a65` | 위와 같음 | 11/6 시연 환경에 올라간 워커 |
+| `main` | PR #919 `feat/paymentstop-agent-api` 커밋 `821286f9` 이후 | 내부 API 계약 `docs/phase2/objection_agent_contract.md` |
+| `5abdf2d` + 프롬프트 | 위와 같음 | 11/6 시연 환경에 올라간 워커. 프롬프트는 이후 바뀌지 않았다(암호화 커밋 `d90248d`의 `prompts.py`와 같다) |
+
+11/5에 두 레포 모두 이력을 다시 써서(민감 파일 정리) 그 전의 커밋 해시는 쓰지 않는다.
 
 평가 시드(`eval/seed.sql`)는 서버 Flyway `V202611051600`까지의 `customer`, `account`, `transfer`, `ledger_entry` 컬럼을 가정한다. 서버에서 이 테이블이 바뀌면 시드를 다시 만든다.
 
