@@ -289,7 +289,7 @@ def build_ocr(config: Config) -> OcrEngine | None:
         return None
     if not TesseractEngine.available():
         log.warning("tesseract 가 없어 서류 글자 인식이 실패로 남습니다. README 「OCR」 참고")
-    return TesseractEngine(config.ocr_lang, max_pages=config.ocr_max_pages)
+    return TesseractEngine(config.ocr_lang, max_pages=config.ocr_max_pages, preprocess=config.ocr_preprocess)
 
 
 def build_analyzer(config: Config) -> Analyzer:

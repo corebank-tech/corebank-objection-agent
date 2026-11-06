@@ -7,3 +7,4 @@ eval/objections.json
 eval/timing_*.sql
 eval/timing_manifest_*.json
 eval/documents/*.png
+eval/ocr_bench_result.md
