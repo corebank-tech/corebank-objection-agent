@@ -69,6 +69,7 @@ class FakeServer:
         documents: list[dict[str, Any]] | None = None,
         external_checks: list[dict[str, Any]] | None = None,
         leak_id_copy: bool = False,
+        gate_branch: str | None = None,
     ):
         self.ledger = ledger
         self.statement = statement
@@ -78,6 +79,8 @@ class FakeServer:
         self.external_checks = external_checks or []
         # 서버가 계약을 어기고 신분증 사본을 내부 목록에 섞어 주는 경우를 흉내 낸다. 워커는 그래도 내려받지 않아야 한다
         self.leak_id_copy = leak_id_copy
+        # None 이면 해제 요건 점검 API 가 없는 옛 서버처럼 404 를 돌려준다
+        self.gate_branch = gate_branch
         self.paths: list[str] = []
         self.ocr_puts: list[dict[str, Any]] = []
         self.forbidden: list[str] = []
@@ -119,6 +122,8 @@ class FakeServer:
             handled = self._handle_v2(request, path.removeprefix("/internal/objections/7/"))
             if handled is not None:
                 return handled
+        if path == "/internal/objections/7/gate" and self.gate_branch is not None:
+            return _ok({"branch": self.gate_branch})
         if path == "/internal/objections/7/ledger":
             params = dict(request.url.params)
             self.ledger_calls.append(params)

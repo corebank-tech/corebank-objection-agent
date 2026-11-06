@@ -65,6 +65,16 @@ class ServerClient:
     def external_checks(self, token: str, objection_id: int) -> list[dict[str, Any]]:
         return self._call("GET", f"/internal/objections/{objection_id}/external-checks", token=token) or []
 
+    def gate_branch(self, token: str, objection_id: int) -> str | None:
+        """해제 요건 점검 갈래. 이 API 가 없는 옛 서버면 None."""
+        try:
+            data = self._call("GET", f"/internal/objections/{objection_id}/gate", token=token)
+        except ServerError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return (data or {}).get("branch")
+
     def record_step(self, token: str, run_id: int, step: dict[str, Any]) -> None:
         self._call("POST", f"/internal/agent-runs/{run_id}/steps", token=token, json=step)
 

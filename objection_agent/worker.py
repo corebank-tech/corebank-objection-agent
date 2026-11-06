@@ -10,6 +10,7 @@ from objection_agent import prompts
 from objection_agent.config import Config
 from objection_agent.llm.port import EXTERNAL_CHECKS_TOOL_NAME, Analysis, Analyzer, ExternalChecksFn, ToolCall
 from objection_agent.ocr import OcrEngine, OcrError, TesseractEngine, count_low_confidence, count_regions
+from objection_agent.policy import apply_guards
 from objection_agent.server import ServerClient, ServerError
 from objection_agent.steps import StepRecorder
 
@@ -95,7 +96,8 @@ def run_once(server: ServerClient, analyzer: Analyzer, step_delay: float = 0.0, 
         analysis = analyzer.analyze(context, ledger, on_tool_call, external_checks)
         dropped = _keep_seen(analysis.draft, seen, tainted)
         _check_claim_sources(analysis.draft, context.get("documents"))
-        _record_findings(steps, analysis, dropped)
+        adjusted = apply_guards(analysis.draft, server.gate_branch(token, objection_id))
+        _record_findings(steps, analysis, dropped, adjusted)
         result = server.submit_draft(token, objection_id, _draft_request(analysis))
         log.info("판정안 제출 runId=%s agent=%s gate=%s", run_id, result["agentBranch"], result["gateBranch"])
     except ServerError as exc:
@@ -216,7 +218,9 @@ def _keep_seen(draft: dict[str, Any], seen: set[str], tainted: set[str]) -> dict
     return dropped
 
 
-def _record_findings(steps: StepRecorder, analysis: Analysis, dropped: dict[str, list[str]]) -> None:
+def _record_findings(
+    steps: StepRecorder, analysis: Analysis, dropped: dict[str, list[str]], adjusted: list[dict[str, str]] | None = None
+) -> None:
     draft = analysis.draft
     if draft["claims"]:
         steps.record(
@@ -238,6 +242,7 @@ def _record_findings(steps: StepRecorder, analysis: Analysis, dropped: dict[str,
             "model": analysis.model,
             "costMicroUsd": analysis.cost_micro_usd,
             "droppedTransactionNumbers": dropped,
+            "branchAdjustments": adjusted or [],
         },
     )
 

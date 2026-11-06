@@ -5,13 +5,14 @@
 
 import json
 import math
+import os
 import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 HERE = Path(__file__).parent
-MANIFEST = {s["id"]: s for s in json.loads((HERE / "manifest.json").read_text())}
+MANIFEST = {s["id"]: s for s in json.loads(Path(os.environ.get("EVAL_MANIFEST", HERE / "manifest.json")).read_text())}
 FRAUD_KINDS = {"M"}
 FRAUD_IDS = {sid for sid, s in MANIFEST.items() if s["expected_gate"] == "FRAUD_PATTERN"}
 NORMAL_IDS = {sid for sid, s in MANIFEST.items() if s["label"] == "NORMAL_ACCEPT"}
