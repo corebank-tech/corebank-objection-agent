@@ -12,10 +12,13 @@ confidence 는 엔진이 낸 글자 인식 확률(0~1)이다. 0.85 미만은 담
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -24,11 +27,19 @@ from PIL import Image
 from objection_agent import preprocess
 
 Page = dict[str, Any]
+log = logging.getLogger("objection_agent")
 
 LOW_CONFIDENCE = 0.85
 # 방향 감지 신뢰도. 이 이상이면 바로 돌리고, 사이면 원본과 돌린 것을 둘 다 읽는다
 OSD_SURE = 4.0
 OSD_MAYBE = 1.0
+# 서버 OCR PUT 상한(contract-v2 §6): 쪽 50, 엔진 이름 40자, 영역 글 2000자, 쪽당 영역 2000개
+MAX_PAGES_LIMIT = 50
+ENGINE_NAME_LIMIT = 40
+REGION_TEXT_LIMIT = 2000
+REGIONS_PER_PAGE_LIMIT = 2000
+# 자식 프로세스(poppler, tesseract)에 넘기는 환경. API 키와 워커 키를 물려주지 않는다
+_CHILD_ENV_KEYS = ("PATH", "TESSDATA_PREFIX", "LANG", "LC_ALL", "TMPDIR")
 
 
 class OcrError(RuntimeError):
@@ -39,7 +50,7 @@ class OcrEngine(Protocol):
     @property
     def name(self) -> str: ...
 
-    def recognize(self, content: bytes) -> list[Page]: ...
+    def recognize(self, content: bytes, check: Callable[[], None] | None = None) -> list[Page]: ...
 
 
 def detect_format(content: bytes) -> str:
@@ -65,10 +76,11 @@ class TesseractEngine:
     ):
         self._lang = lang
         self._preprocess = preprocess
+        self.truncated = False  # 마지막 recognize 에서 쪽 상한 때문에 뒷쪽을 읽지 않았는지
         # 4 는 「크기가 다른 글이 한 단으로 이어진 문서」. 서식 서류에서 3(자동)보다 줄을 덜 빠뜨린다
         self._psm = psm
         self._dpi = dpi
-        self._max_pages = max_pages
+        self._max_pages = max(1, min(max_pages, MAX_PAGES_LIMIT))
         self._timeout = timeout_seconds
         self._name: str | None = None
 
@@ -85,17 +97,21 @@ class TesseractEngine:
                 version = out.splitlines()[0].strip() or version
             except OcrError:
                 pass
-            self._name = f"{version} {self._lang}"[:60]
+            self._name = f"{version} {self._lang}"[:ENGINE_NAME_LIMIT]
         return self._name
 
-    def recognize(self, content: bytes) -> list[Page]:
+    def recognize(self, content: bytes, check: Callable[[], None] | None = None) -> list[Page]:
+        """check 는 쪽마다 부르는 마감 확인이다. 마감을 넘겼으면 예외를 올려 읽기를 멈춘다."""
         kind = detect_format(content)
+        self.truncated = False
         with tempfile.TemporaryDirectory(prefix="ocr-") as tmp:
             work = Path(tmp)
             sources = [p.read_bytes() for p in self._pdf_pages(content, work)] if kind == "pdf" else [content]
             pages: list[Page] = []
             next_index = 0
             for number, source in enumerate(sources, start=1):
+                if check is not None:
+                    check()
                 page = self._read_page(source, number, next_index, work)
                 next_index += len(page["regions"])
                 pages.append(page)
@@ -106,9 +122,12 @@ class TesseractEngine:
             return self._ocr(source, number, start_index, work)
         try:
             gray, transform = preprocess.load_gray(source)
+            gray = preprocess.upscale(gray, transform)
+        except preprocess.ImageRejected as exc:
+            raise OcrError(str(exc)) from exc
         except Exception as exc:  # 깨진 이미지는 그 서류만 실패로 남긴다
             raise OcrError("이미지를 열지 못함") from exc
-        gray = preprocess.flatten(preprocess.upscale(gray, transform))
+        gray = preprocess.flatten(gray)
 
         # 방향 감지가 확실하면 돌리고, 애매하면 원본과 돌린 것을 둘 다 읽어 결과가 나은 쪽을 쓴다
         rotation, confidence = self._orientation(gray, work)
@@ -165,27 +184,45 @@ class TesseractEngine:
         source = work / "document.pdf"
         source.write_bytes(content)
         prefix = work / "page"
+        # 상한보다 한 쪽 더 만들어 보고, 생기면 뒷쪽이 있다는 표시만 남기고 읽지 않는다
         self._run(
-            [_binary("pdftoppm"), "-r", str(self._dpi), "-png", "-l", str(self._max_pages), str(source), str(prefix)]
+            [
+                _binary("pdftoppm"),
+                "-r",
+                str(self._dpi),
+                "-png",
+                "-l",
+                str(self._max_pages + 1),
+                str(source),
+                str(prefix),
+            ]
         )
         # pdftoppm 은 쪽 수에 따라 page-1.png 또는 page-01.png 로 이름을 붙인다
         images = sorted(work.glob("page-*.png"), key=lambda p: int(p.stem.rsplit("-", 1)[1]))
         if not images:
             raise OcrError("PDF 에서 쪽 이미지를 만들지 못함")
-        return images
+        self.truncated = len(images) > self._max_pages
+        return images[: self._max_pages]
 
     def _run(self, args: list[str]) -> str:
         try:
             # 인자는 목록으로만 넘기고 셸을 쓰지 않는다. 파일 경로는 워커가 만든 임시 경로다
             result = subprocess.run(  # noqa: S603
-                args, capture_output=True, timeout=self._timeout, check=False
+                args, capture_output=True, timeout=self._timeout, check=False, env=_child_env()
             )
         except subprocess.TimeoutExpired as exc:
             raise OcrError(f"{Path(args[0]).name} 시간 초과") from exc
         if result.returncode != 0:
-            message = result.stderr.decode("utf-8", "replace").strip().splitlines()
-            raise OcrError(f"{Path(args[0]).name} 실패: {message[-1] if message else result.returncode}"[:200])
+            # stderr 에는 임시 경로가 들어 있어 화면에 남기지 않는다. 원문은 워커 로그에만 남긴다
+            log.warning("%s 실패 code=%s %s", Path(args[0]).name, result.returncode, result.stderr[-500:])
+            raise OcrError(f"{Path(args[0]).name} 실패(코드 {result.returncode})")
         return result.stdout.decode("utf-8", "replace")
+
+
+def _child_env() -> dict[str, str]:
+    env = {k: os.environ[k] for k in _CHILD_ENV_KEYS if k in os.environ}
+    env["OMP_THREAD_LIMIT"] = "1"  # 워커 여럿이 한 호스트에서 돌 때 tesseract 가 코어를 독차지하지 않게 한다
+    return env
 
 
 def _binary(name: str) -> str:
@@ -236,12 +273,12 @@ def parse_tsv(tsv: str, page_number: int, start_index: int = 0, text: str | None
         regions.append(
             {
                 "index": start_index + len(regions),
-                "text": candidates.pop(0) if candidates else joined,
+                "text": (candidates.pop(0) if candidates else joined)[:REGION_TEXT_LIMIT],
                 "bbox": [x0, y0, x1 - x0, y1 - y0],
                 "confidence": round(sum(w[5] for w in words) / len(words) / 100, 3),
             }
         )
-    return {"page": page_number, "width": width, "height": height, "regions": regions}
+    return {"page": page_number, "width": width, "height": height, "regions": regions[:REGIONS_PER_PAGE_LIMIT]}
 
 
 def _compact(value: str) -> str:
