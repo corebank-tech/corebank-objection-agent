@@ -9,6 +9,7 @@ from typing import Any
 from objection_agent.llm.port import (
     EXTERNAL_CHECKS_TOOL_NAME,
     Analysis,
+    Deadline,
     ExternalChecksFn,
     LedgerFn,
     ToolCall,
@@ -33,6 +34,7 @@ class ScriptedAnalyzer:
         ledger: LedgerFn,
         on_tool_call: ToolCallback,
         external_checks: ExternalChecksFn | None = None,
+        deadline: Deadline | None = None,
     ) -> Analysis:
         disputed = context["disputedTransfers"]
         disputed_numbers = [item["transactionNumber"] for item in disputed]

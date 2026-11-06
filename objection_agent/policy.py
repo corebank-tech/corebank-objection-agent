@@ -51,6 +51,16 @@ def apply_gate_guard(draft: dict[str, Any], gate_branch: str | None) -> dict[str
     return {"from": branch, "to": target, "rule": RULE_GATE}
 
 
+NOTICE_FOLLOW_UP = "보정 규칙으로 갈래가 바뀜. 안내문 초안은 바뀌기 전 갈래 기준이므로 최종 판정에 맞춰 확인"
+
+
 def apply_guards(draft: dict[str, Any], gate_branch: str | None) -> list[dict[str, str]]:
-    """보정 규칙을 순서대로 적용하고 바뀐 내역을 돌려준다."""
-    return [a for a in (apply_branch_guard(draft), apply_gate_guard(draft, gate_branch)) if a]
+    """보정 규칙을 순서대로 적용하고 바뀐 내역을 돌려준다.
+
+    안내문 초안은 모델이 원래 갈래로 쓴 글이라 그대로 두되(자료 요청 같은 쓸 만한 내용이 있다), 담당자가 최종 판정에 맞춰
+    다시 보도록 추가 확인 항목을 붙인다.
+    """
+    adjusted = [a for a in (apply_branch_guard(draft), apply_gate_guard(draft, gate_branch)) if a]
+    if adjusted and NOTICE_FOLLOW_UP not in draft.setdefault("followUps", []):
+        draft["followUps"].append(NOTICE_FOLLOW_UP)
+    return adjusted

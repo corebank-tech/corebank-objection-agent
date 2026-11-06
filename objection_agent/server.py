@@ -52,14 +52,20 @@ class ServerClient:
         return response.content
 
     def put_ocr(
-        self, token: str, objection_id: int, document_id: int, engine: str, pages: list[dict[str, Any]]
+        self,
+        token: str,
+        objection_id: int,
+        document_id: int,
+        engine: str,
+        pages: list[dict[str, Any]],
+        status: str = "DONE",
     ) -> dict[str, Any]:
-        """OCR 원문을 올린다. 서버가 가명 처리해 저장하고 가명 처리한 값을 돌려준다."""
+        """OCR 원문을 올린다. 서버가 가명 처리해 저장하고 가명 처리한 값을 돌려준다. 읽지 못했으면 status=FAILED, pages=[]."""
         return self._call(
             "PUT",
             f"/internal/objections/{objection_id}/documents/{document_id}/ocr",
             token=token,
-            json={"engine": engine, "pages": pages},
+            json={"engine": engine, "status": status, "pages": pages},
         )
 
     def external_checks(self, token: str, objection_id: int) -> list[dict[str, Any]]:
