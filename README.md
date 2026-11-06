@@ -29,6 +29,12 @@ PR #919가 dev에 머지되기 전에는 [브랜치의 계약 문서](https://gi
 
 평가 시드(`eval/seed.sql`)는 서버 Flyway `V202611051600`까지의 `customer`, `account`, `transfer`, `ledger_entry` 컬럼을 가정한다. 서버에서 이 테이블이 바뀌면 시드를 다시 만든다.
 
+## OCR 전처리와 품질
+
+서류는 읽기 전에 EXIF 방향, 해상도(가로 1600픽셀 미만 확대), 조명(배경 평탄화), 방향(Tesseract 방향 감지, 애매하면 두 방향을 모두 읽어 나은 쪽), 기울기(최대 12도), 잡음(중앙값 필터)을 바로잡는다(`objection_agent/preprocess.py`). 영역 상자는 원본 이미지 좌표로 되돌려 저장한다. `AGENT_OCR_PREPROCESS=false`로 끌 수 있다.
+
+합성 서류 4종 × 글꼴 2종 × 열화 11종 측정(`eval/ocr_bench.py`, 결과 [docs/results/261106-ocr/ocr_bench.md](docs/results/261106-ocr/ocr_bench.md)): 글자 오류율 14.4% → 1.2%, 금액, 날짜, 연락처 추출 174/242 → 230/242. 90도 회전, 8도 기울기, 잡음, 사진 흉내에서 개선이 크고, 깨끗한 PDF는 0.3% → 2.2%로 약간 나빠진다. 손글씨, 표가 복잡한 서식, 도장이 겹친 글자는 측정하지 않았다.
+
 ## 암호화 파일
 
 프롬프트(`objection_agent/prompts.py`), 평가 시나리오와 정답(`eval/scenarios.py`, `eval/manifest.json`, `eval/private/`), 평가 원자료(`docs/results/**/results-*.json`)는

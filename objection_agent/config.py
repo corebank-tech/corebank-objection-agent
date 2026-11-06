@@ -19,6 +19,7 @@ class Config:
     ocr: str = "tesseract"  # "tesseract" 는 로컬 Tesseract CLI, "off" 는 서류 글자 인식을 건너뛴다
     ocr_lang: str = "kor+eng"
     ocr_max_pages: int = 10  # PDF 한 건에서 읽는 최대 쪽 수
+    ocr_preprocess: bool = True  # 방향, 기울기, 조명, 잡음 보정(objection_agent.preprocess)
 
     @staticmethod
     def from_env() -> Config:
@@ -34,4 +35,5 @@ class Config:
             ocr=os.environ.get("AGENT_OCR", "tesseract"),
             ocr_lang=os.environ.get("AGENT_OCR_LANG", "kor+eng"),
             ocr_max_pages=int(os.environ.get("AGENT_OCR_MAX_PAGES", "10")),
+            ocr_preprocess=os.environ.get("AGENT_OCR_PREPROCESS", "true").lower() != "false",
         )

@@ -1,5 +1,6 @@
 """증빙 서류 글자 인식(PA-12). 로컬 Tesseract CLI 로 읽고, PDF 는 poppler pdftoppm 으로 쪽 이미지로 바꿔 읽는다.
 
+읽기 전에 방향, 기울기, 조명, 잡음, 해상도를 바로잡고(objection_agent.preprocess), 영역 상자는 원본 좌표로 되돌린다.
 원본 이미지는 LLM 에 보내지 않는다. 워커는 인식한 글자를 서버에 올리고, 서버가 가명 처리한 글자만 분석에 쓴다.
 신분증 사본은 서버가 내부 API 로 주지 않고, 워커도 증빙이 아닌 서류는 읽지 않는다(D37).
 
@@ -11,15 +12,23 @@ confidence 는 엔진이 낸 글자 인식 확률(0~1)이다. 0.85 미만은 담
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Protocol
 
+from PIL import Image
+
+from objection_agent import preprocess
+
 Page = dict[str, Any]
 
 LOW_CONFIDENCE = 0.85
+# 방향 감지 신뢰도. 이 이상이면 바로 돌리고, 사이면 원본과 돌린 것을 둘 다 읽는다
+OSD_SURE = 4.0
+OSD_MAYBE = 1.0
 
 
 class OcrError(RuntimeError):
@@ -46,9 +55,16 @@ def detect_format(content: bytes) -> str:
 
 class TesseractEngine:
     def __init__(
-        self, lang: str = "kor+eng", dpi: int = 200, max_pages: int = 10, timeout_seconds: float = 60.0, psm: int = 4
+        self,
+        lang: str = "kor+eng",
+        dpi: int = 200,
+        max_pages: int = 10,
+        timeout_seconds: float = 60.0,
+        psm: int = 4,
+        preprocess: bool = True,
     ):
         self._lang = lang
+        self._preprocess = preprocess
         # 4 는 「크기가 다른 글이 한 단으로 이어진 문서」. 서식 서류에서 3(자동)보다 줄을 덜 빠뜨린다
         self._psm = psm
         self._dpi = dpi
@@ -76,36 +92,74 @@ class TesseractEngine:
         kind = detect_format(content)
         with tempfile.TemporaryDirectory(prefix="ocr-") as tmp:
             work = Path(tmp)
-            if kind == "pdf":
-                images = self._pdf_pages(content, work)
-            else:
-                image = work / f"page.{kind}"
-                image.write_bytes(content)
-                images = [image]
+            sources = [p.read_bytes() for p in self._pdf_pages(content, work)] if kind == "pdf" else [content]
             pages: list[Page] = []
             next_index = 0
-            for number, image in enumerate(images, start=1):
-                # 한 번 돌려 txt 와 tsv 를 함께 받는다. tsv 는 한글 음절을 단어로 쪼개는 일이 있어 줄 글은 txt 에서 가져온다
-                base = work / f"out-{number}"
-                self._run(
-                    [
-                        _binary("tesseract"),
-                        str(image),
-                        str(base),
-                        "-l",
-                        self._lang,
-                        "--psm",
-                        str(self._psm),
-                        "txt",
-                        "tsv",
-                    ]
-                )
-                tsv = base.with_suffix(".tsv").read_text("utf-8", "replace")
-                text = base.with_suffix(".txt").read_text("utf-8", "replace")
-                page = parse_tsv(tsv, number, next_index, text)
+            for number, source in enumerate(sources, start=1):
+                page = self._read_page(source, number, next_index, work)
                 next_index += len(page["regions"])
                 pages.append(page)
         return pages
+
+    def _read_page(self, source: bytes, number: int, start_index: int, work: Path) -> Page:
+        if not self._preprocess:
+            return self._ocr(source, number, start_index, work)
+        try:
+            gray, transform = preprocess.load_gray(source)
+        except Exception as exc:  # 깨진 이미지는 그 서류만 실패로 남긴다
+            raise OcrError("이미지를 열지 못함") from exc
+        gray = preprocess.flatten(preprocess.upscale(gray, transform))
+
+        # 방향 감지가 확실하면 돌리고, 애매하면 원본과 돌린 것을 둘 다 읽어 결과가 나은 쪽을 쓴다
+        rotation, confidence = self._orientation(gray, work)
+        candidates = [(gray, transform)]
+        if rotation:
+            turned_transform = transform.copy()
+            turned = preprocess.rotate(gray, -rotation, turned_transform)
+            if confidence >= OSD_SURE:
+                candidates = [(turned, turned_transform)]
+            elif confidence >= OSD_MAYBE:
+                candidates.append((turned, turned_transform))
+
+        best: tuple[float, Page] | None = None
+        for image, base in candidates:
+            applied = base.copy()
+            cleaned = preprocess.denoise(preprocess.deskew(image, applied))
+            page = self._ocr(preprocess.to_png(cleaned), number, start_index, work)
+            for region in page["regions"]:
+                region["bbox"] = applied.to_original(region["bbox"])
+            page["width"], page["height"] = applied.original_size
+            score = sum(r["confidence"] * len(r["text"]) for r in page["regions"])
+            if best is None or score > best[0]:
+                best = (score, page)
+        assert best is not None  # noqa: S101 - 후보는 항상 하나 이상이다
+        return best[1]
+
+    def _ocr(self, image: bytes, number: int, start_index: int, work: Path) -> Page:
+        # 한 번 돌려 txt 와 tsv 를 함께 받는다. tsv 는 한글 음절을 단어로 쪼개는 일이 있어 줄 글은 txt 에서 가져온다
+        source = work / f"in-{number}.img"
+        source.write_bytes(image)
+        base = work / f"out-{number}"
+        self._run(
+            [_binary("tesseract"), str(source), str(base), "-l", self._lang, "--psm", str(self._psm), "txt", "tsv"]
+        )
+        tsv = base.with_suffix(".tsv").read_text("utf-8", "replace")
+        text = base.with_suffix(".txt").read_text("utf-8", "replace")
+        return parse_tsv(tsv, number, start_index, text)
+
+    def _orientation(self, image: Image.Image, work: Path) -> tuple[int, float]:
+        """Tesseract 방향 감지. (돌려야 할 각도, 신뢰도). 글자가 적거나 osd 데이터가 없으면 (0, 0)."""
+        path = work / "osd.png"
+        path.write_bytes(preprocess.to_png(image))
+        try:
+            out = self._run([_binary("tesseract"), str(path), "-", "--psm", "0", "-l", "osd"])
+        except OcrError:
+            return 0, 0.0
+        rotate = re.search(r"Rotate:\s*(\d+)", out)
+        confidence = re.search(r"Orientation confidence:\s*([\d.]+)", out)
+        if not rotate or not confidence:
+            return 0, 0.0
+        return int(rotate.group(1)) % 360, float(confidence.group(1))
 
     def _pdf_pages(self, content: bytes, work: Path) -> list[Path]:
         source = work / "document.pdf"

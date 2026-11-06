@@ -57,9 +57,24 @@ def test_detect_format_uses_magic_bytes():
         detect_format(b"GIF89a")
 
 
+def _small_png() -> bytes:
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("L", (40, 20), 255).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
 def test_missing_binary_is_ocr_error(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda _: None)
     with pytest.raises(OcrError, match="설치"):
+        TesseractEngine().recognize(_small_png())
+
+
+def test_broken_image_is_ocr_error():
+    with pytest.raises(OcrError, match="이미지"):
         TesseractEngine().recognize(b"\x89PNG\r\n\x1a\nxxxx")
 
 
