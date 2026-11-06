@@ -19,7 +19,7 @@ def test_relationship_case_submits_normal_accept_with_prior_transfers_only():
     assert draft["branch"] == "NORMAL_ACCEPT"
     assert DISPUTED not in draft["evidenceTransactionNumbers"]
     assert len(draft["evidenceTransactionNumbers"]) == 3
-    assert draft["promptVersion"] == "objection-v2"
+    assert draft["promptVersion"] == "objection-v2.1"
     tool = fake.steps[2]["detail"]
     assert tool["tool"] == "get_ledger" and tool["args"] == {"counterparty": "CP-0000000a"}
 

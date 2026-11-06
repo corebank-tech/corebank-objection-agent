@@ -69,6 +69,7 @@ class FakeServer:
         documents: list[dict[str, Any]] | None = None,
         external_checks: list[dict[str, Any]] | None = None,
         leak_id_copy: bool = False,
+        gate_branch: str | None = None,
     ):
         self.ledger = ledger
         self.statement = statement
@@ -78,6 +79,8 @@ class FakeServer:
         self.external_checks = external_checks or []
         # 서버가 계약을 어기고 신분증 사본을 내부 목록에 섞어 주는 경우를 흉내 낸다. 워커는 그래도 내려받지 않아야 한다
         self.leak_id_copy = leak_id_copy
+        # None 이면 해제 요건 점검 API 가 없는 옛 서버처럼 404 를 돌려준다
+        self.gate_branch = gate_branch
         self.paths: list[str] = []
         self.ocr_puts: list[dict[str, Any]] = []
         self.forbidden: list[str] = []
@@ -86,6 +89,7 @@ class FakeServer:
         self.steps: list[dict[str, Any]] = []
         self.drafts: list[dict[str, Any]] = []
         self.ledger_calls: list[dict[str, str]] = []
+        self.ledger_error: tuple[int, str] | None = None  # (HTTP 상태, 오류코드). 토큰 만료 등을 흉내 낸다
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
@@ -119,13 +123,23 @@ class FakeServer:
             handled = self._handle_v2(request, path.removeprefix("/internal/objections/7/"))
             if handled is not None:
                 return handled
+        if path == "/internal/objections/7/gate" and self.gate_branch is not None:
+            return _ok({"branch": self.gate_branch})
         if path == "/internal/objections/7/ledger":
+            if self.ledger_error:
+                status, code = self.ledger_error
+                return httpx.Response(status, json={"code": code, "message": "거부"})
             params = dict(request.url.params)
             self.ledger_calls.append(params)
             cp = params.get("counterparty")
             return _ok([i for i in self.ledger if cp is None or i["counterpartyKey"] == cp])
         if path == "/internal/agent-runs/41/steps":
             step = json.loads(request.content)
+            # 실제 서버처럼 같은 순번의 같은 내용은 받아 주고, 다른 내용이면 PST0307 로 거부한다
+            if step["seq"] <= len(self.steps):
+                if self.steps[step["seq"] - 1] == step:
+                    return _ok(None)
+                return httpx.Response(409, json={"code": "PST0307", "message": "같은 순번에 다른 단계"})
             assert step["seq"] == len(self.steps) + 1
             self.steps.append(step)
             return _ok(None)
@@ -133,6 +147,8 @@ class FakeServer:
             if self.fail_draft_code:
                 return httpx.Response(400, json={"code": self.fail_draft_code, "message": "거부"})
             draft = json.loads(request.content)
+            if _invalid_draft(draft):
+                return httpx.Response(400, json={"code": "CMN0400", "message": _invalid_draft(draft)})
             self.drafts.append(draft)
             return _ok({"runId": 41, "agentBranch": draft["branch"], "gateBranch": draft["branch"]})
         return httpx.Response(404, json={"code": "CMN0404", "message": path})
@@ -147,7 +163,7 @@ class FakeServer:
                     "documentId": d["documentId"],
                     "round": d["round"],
                     "ocrStatus": d["ocrStatus"],
-                    "pages": d["pages"] if d["ocrStatus"] == "DONE" else None,
+                    "pages": d["pages"] if d["ocrStatus"] == "DONE" else [],  # 실제 서버도 읽기 전에는 빈 배열이다
                     **({"kind": d["kind"]} if self.leak_id_copy else {}),
                 }
                 for d in self._visible()
@@ -189,7 +205,7 @@ class FakeServer:
         body = json.loads(request.content)
         self.ocr_puts.append({"documentId": doc["documentId"], **body})
         pages = _pseudonymize(body["pages"])
-        doc["pages"], doc["ocrStatus"] = pages, "DONE"
+        doc["pages"], doc["ocrStatus"] = pages, body.get("status") or "DONE"
         return _ok({"documentId": doc["documentId"], "pages": pages})
 
 
@@ -202,6 +218,23 @@ def _pseudonymize(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         for page in pages
     ]
+
+
+def _invalid_draft(draft: dict[str, Any]) -> str | None:
+    """실제 서버 DraftRequest 검증(AgentInternalController)과 같은 상한."""
+    lists = {"evidenceTransactionNumbers": (100, 20), "missingDocuments": (50, 200), "followUps": (50, 300)}
+    for key, (count, length) in lists.items():
+        values = draft.get(key) or []
+        if len(values) > count or any(not str(v).strip() or len(str(v)) > length for v in values):
+            return key
+    for key in ("claims", "contradictions"):
+        if len(draft.get(key) or []) > 50:
+            return key
+    if len(draft.get("noticeDraft") or "") > 2000:
+        return "noticeDraft"
+    if len(draft.get("model") or "") > 60 or len(draft.get("promptVersion") or "") > 30:
+        return "model"
+    return None
 
 
 def _ok(data: Any) -> httpx.Response:

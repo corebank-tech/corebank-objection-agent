@@ -5,13 +5,15 @@
 
 import json
 import math
+import os
 import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 HERE = Path(__file__).parent
-MANIFEST = {s["id"]: s for s in json.loads((HERE / "manifest.json").read_text())}
+MANIFEST_PATH = Path(os.environ.get("EVAL_MANIFEST", HERE / "manifest.json"))
+MANIFEST = {s["id"]: s for s in json.loads(MANIFEST_PATH.read_text())}
 FRAUD_KINDS = {"M"}
 FRAUD_IDS = {sid for sid, s in MANIFEST.items() if s["expected_gate"] == "FRAUD_PATTERN"}
 NORMAL_IDS = {sid for sid, s in MANIFEST.items() if s["label"] == "NORMAL_ACCEPT"}
@@ -72,6 +74,10 @@ def analyze(runs, model_prefix):
     # 2. 위험 방향 오류: 정답이 수용이 아닌데 AI 가 수용 후보를 낸 비율(게이트가 막지만 담당자를 오도할 수 있다)
     risky = [r for r in done if MANIFEST[r["scenario"]]["label"] != "NORMAL_ACCEPT"]
     m["falseAccept"] = rate(sum(r["agentBranch"] == "NORMAL_ACCEPT" for r in risky), len(risky))
+    # 일부 지급정지도 피해금 밖을 풀어 주는 방향이다. 정답이 해제 계열이 아닌 건에서 해제 계열을 낸 비율
+    releasing = ("NORMAL_ACCEPT", "NORMAL_PARTIAL")
+    held = [r for r in done if MANIFEST[r["scenario"]]["label"] not in releasing]
+    m["falseRelease"] = rate(sum(r["agentBranch"] in releasing for r in held), len(held))
     m["fraudMissed"] = rate(
         sum(r["agentBranch"] != "FRAUD_PATTERN" for r in done if r["scenario"] in FRAUD_IDS),
         sum(1 for r in done if r["scenario"] in FRAUD_IDS),
@@ -179,6 +185,7 @@ def report(all_metrics, struct):
         ("consistency", "반복 일치율(같은 건 3회 갈래 동일)"),
         ("gateAgreement", "서버 규칙과 갈래 일치"),
         ("falseAccept", "정답이 수용이 아닌데 수용 후보를 낸 비율"),
+        ("falseRelease", "정답이 해제 계열이 아닌데 수용이나 일부 지급정지를 낸 비율"),
         ("fraudMissed", "사기 건을 사기 패턴으로 못 본 비율"),
         ("contradictionRecall", "심어 둔 모순 탐지율"),
         ("contradictionRecallGatePasses", "규칙 통과 모순 건(C) 탐지율"),
@@ -237,6 +244,12 @@ if __name__ == "__main__":
     source = Path(sys.argv[1])
     out = source.parent
     runs = json.loads(source.read_text())
+    # 결과 파일에 세트 표시가 있으면 지금 고른 정답 세트와 같아야 한다. 다른 세트의 정답으로 조용히 채점하는 것을 막는다
+    sets = {r["set"] for r in runs if r.get("set")}
+    if sets and sets != {MANIFEST_PATH.stem}:
+        raise SystemExit(
+            f"결과 세트 {sorted(sets)} 와 정답 세트 {MANIFEST_PATH.stem} 가 다릅니다. EVAL_MANIFEST 를 확인하세요."
+        )
     prefixes = sys.argv[2:] or ["claude-opus"]
     all_metrics = {p: analyze(runs, p) for p in prefixes}
     struct = structural()

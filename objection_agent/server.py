@@ -52,18 +52,34 @@ class ServerClient:
         return response.content
 
     def put_ocr(
-        self, token: str, objection_id: int, document_id: int, engine: str, pages: list[dict[str, Any]]
+        self,
+        token: str,
+        objection_id: int,
+        document_id: int,
+        engine: str,
+        pages: list[dict[str, Any]],
+        status: str = "DONE",
     ) -> dict[str, Any]:
-        """OCR 원문을 올린다. 서버가 가명 처리해 저장하고 가명 처리한 값을 돌려준다."""
+        """OCR 원문을 올린다. 서버가 가명 처리해 저장하고 가명 처리한 값을 돌려준다. 읽지 못했으면 status=FAILED, pages=[]."""
         return self._call(
             "PUT",
             f"/internal/objections/{objection_id}/documents/{document_id}/ocr",
             token=token,
-            json={"engine": engine, "pages": pages},
+            json={"engine": engine, "status": status, "pages": pages},
         )
 
     def external_checks(self, token: str, objection_id: int) -> list[dict[str, Any]]:
         return self._call("GET", f"/internal/objections/{objection_id}/external-checks", token=token) or []
+
+    def gate_branch(self, token: str, objection_id: int) -> str | None:
+        """해제 요건 점검 갈래. 이 API 가 없는 옛 서버면 None."""
+        try:
+            data = self._call("GET", f"/internal/objections/{objection_id}/gate", token=token)
+        except ServerError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return (data or {}).get("branch")
 
     def record_step(self, token: str, run_id: int, step: dict[str, Any]) -> None:
         self._call("POST", f"/internal/agent-runs/{run_id}/steps", token=token, json=step)

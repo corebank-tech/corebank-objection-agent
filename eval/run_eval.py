@@ -16,11 +16,15 @@ from pathlib import Path
 import httpx
 
 HERE = Path(__file__).parent
+sys.path.insert(0, str(HERE))
 BASE = os.environ.get("EVAL_SERVER_URL", "http://localhost:8080/api/v1")
 MYSQL_CONTAINER = os.environ.get("EVAL_MYSQL_CONTAINER", "objection-demo-mysql")
 MYSQL_PASSWORD = os.environ.get("EVAL_MYSQL_PASSWORD", "localpw")
 ADMIN_PASSWORD = os.environ.get("EVAL_ADMIN_PASSWORD", "Admin1234!")  # 서버 local 프로필 시드 계정
-MANIFEST = json.loads((HERE / "manifest.json").read_text())
+# 다른 세트(홀드아웃 등)는 EVAL_MANIFEST 와 EVAL_TAG 로 고른다. 접수 번호 파일이 세트마다 따로 생긴다
+MANIFEST_PATH = Path(os.environ.get("EVAL_MANIFEST", HERE / "manifest.json"))
+MANIFEST = json.loads(MANIFEST_PATH.read_text())
+OBJECTIONS = HERE / (f"objections-{os.environ['EVAL_TAG']}.json" if os.environ.get("EVAL_TAG") else "objections.json")
 
 
 def sql(query: str) -> list[str]:
@@ -56,6 +60,17 @@ class Admin:
         if r.json()["code"] != "0000":
             raise RuntimeError(f"관리자 로그인 실패: {r.text}")
 
+    def upload(self, objection_id: int, documents: list[dict]):
+        files = [("files", (name, content, "image/png")) for name, content in render_documents(documents)]
+        r = self.http.post(
+            f"/admin/objections/{objection_id}/documents",
+            data={"kind": "EVIDENCE"},
+            files=files,
+            headers={"X-XSRF-TOKEN": self.http.cookies.get("XSRF-TOKEN") or "", "Idempotency-Key": str(uuid.uuid4())},
+        )
+        if r.json().get("code") != "0000":
+            raise RuntimeError(f"서류 업로드 실패 {objection_id}: {r.text}")
+
     def post(self, path, body=None):
         for _ in range(2):
             r = self.http.post(
@@ -73,11 +88,29 @@ class Admin:
         raise RuntimeError(path)
 
 
+def render_documents(documents: list[dict]) -> list[tuple[str, bytes]]:
+    import io
+
+    import documents as generator
+
+    font = generator.find_font()
+    files = []
+    for i, doc in enumerate(documents, start=1):
+        buffer = io.BytesIO()
+        generator.render(doc["title"], doc["lines"], font).save(buffer, "PNG")
+        files.append((f"evidence-{i}.png", buffer.getvalue()))
+    return files
+
+
 def register():
     admin = Admin()
     accounts = dict(
         row.split("\t")
-        for row in sql("SELECT account_number, account_id FROM account WHERE account_number LIKE '0898%'")
+        for row in sql(
+            "SELECT account_number, account_id FROM account WHERE account_number IN ("
+            + ",".join(f"'{s['account']}'" for s in MANIFEST)
+            + ")"
+        )
     )
     ids = {}
     for s in MANIFEST:
@@ -95,9 +128,9 @@ def register():
             "/admin/objections",
             {
                 "caseId": case["data"]["caseId"],
-                "clause": 1,
+                "clause": s.get("clause", 1),
                 "statement": s["statement"],
-                "simplifiedRequested": False,
+                "simplifiedRequested": s.get("simplified", False),
                 "idCopyConfirmed": True,
                 "litigationPending": False,
             },
@@ -105,13 +138,15 @@ def register():
         if objection["code"] != "0000":
             raise RuntimeError(f"이의제기 접수 실패 {s['id']}: {objection}")
         ids[s["id"]] = objection["data"]["objectionId"]
-    (HERE / "objections.json").write_text(json.dumps(ids, indent=1))
+        if s.get("documents"):
+            admin.upload(ids[s["id"]], s["documents"])
+    OBJECTIONS.write_text(json.dumps(ids, indent=1))
     print("registered", len(ids))
 
 
 def drive(target: int):
     admin = Admin()
-    ids = json.loads((HERE / "objections.json").read_text())
+    ids = json.loads(OBJECTIONS.read_text())
     while True:
         rows = sql(
             "SELECT objection_id, COUNT(*), SUM(status IN ('COMPLETED','FAILED')), MAX(status IN ('QUEUED','RUNNING'))"
@@ -134,7 +169,7 @@ def drive(target: int):
 
 
 def collect():
-    ids = json.loads((HERE / "objections.json").read_text())
+    ids = json.loads(OBJECTIONS.read_text())
     query = """
     SELECT JSON_OBJECT(
       'run', r.run_id, 'objection', r.objection_id, 'status', r.status, 'attempt', r.attempt, 'model', r.model,
@@ -157,6 +192,8 @@ def collect():
     by_objection = {v: k for k, v in ids.items()}
     for run in runs:
         run["scenario"] = by_objection.get(run["objection"])
+    # 이 세트의 접수 건 실행만 남기고 어느 정답 세트로 채점해야 하는지 표시한다
+    runs = [dict(run, set=MANIFEST_PATH.stem) for run in runs if run["scenario"] is not None]
     (HERE / "results.json").write_text(json.dumps(runs, ensure_ascii=False, indent=1))
     print("collected", len(runs))
 

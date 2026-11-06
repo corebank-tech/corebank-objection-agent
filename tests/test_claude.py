@@ -140,3 +140,54 @@ def test_tool_turn_limit():
 def test_cost_in_micro_usd():
     assert cost_micro_usd(Usage(1_000_000, 0)) == 4_000_000
     assert cost_micro_usd(Usage(0, 1000, 1000, 1000)) == 20_000 + 200 + 5000
+
+
+def test_contradiction_guard_holds_accept_before_submission():
+    contradicted = {
+        **DRAFT,
+        "contradictions": [
+            {"claim": "매주 정산", "ledgerFact": "석 달에 3번", "transactionNumbers": ["20991231WB0000000001"]}
+        ],
+    }
+    client, _ = fake_client([tool_use_response(), final_response(contradicted)])
+    fake = FakeServer(relationship_ledger(), "친구와 매주 정산했습니다.")
+
+    run_once(
+        ServerClient("http://core/api/v1", "key", transport=fake.transport()),
+        ClaudeAnalyzer("claude-opus-5-5", "low", 8, client),
+    )
+
+    assert fake.drafts[0]["branch"] == "UNDETERMINED"
+    submitted = fake.steps[-1]["detail"]
+    assert submitted["branch"] == "UNDETERMINED"
+    assert submitted["branchAdjustments"] == [
+        {"from": "NORMAL_ACCEPT", "to": "UNDETERMINED", "rule": "CONTRADICTION_BLOCKS_ACCEPT"}
+    ]
+
+
+def test_gate_guard_holds_accept_without_release_ground():
+    client, _ = fake_client([tool_use_response(), final_response()])
+    fake = FakeServer(relationship_ledger(), "친구와 자주 주고받았습니다.", gate_branch="UNDETERMINED")
+
+    run_once(
+        ServerClient("http://core/api/v1", "key", transport=fake.transport()),
+        ClaudeAnalyzer("claude-opus-5-5", "low", 8, client),
+    )
+
+    assert fake.drafts[0]["branch"] == "UNDETERMINED"
+    assert fake.steps[-1]["detail"]["branchAdjustments"] == [
+        {"from": "NORMAL_ACCEPT", "to": "UNDETERMINED", "rule": "GATE_LIMITS_ACCEPT"}
+    ]
+
+
+def test_gate_guard_keeps_accept_when_gate_agrees():
+    client, _ = fake_client([tool_use_response(), final_response()])
+    fake = FakeServer(relationship_ledger(), "친구에게 빌려준 돈입니다.", gate_branch="NORMAL_ACCEPT")
+
+    run_once(
+        ServerClient("http://core/api/v1", "key", transport=fake.transport()),
+        ClaudeAnalyzer("claude-opus-5-5", "low", 8, client),
+    )
+
+    assert fake.drafts[0]["branch"] == "NORMAL_ACCEPT"
+    assert fake.steps[-1]["detail"]["branchAdjustments"] == []

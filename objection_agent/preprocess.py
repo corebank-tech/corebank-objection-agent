@@ -16,6 +16,11 @@ from PIL import Image, ImageFilter, ImageMath, ImageOps
 
 # 이보다 좁은 이미지는 키워서 읽는다. Tesseract 는 글자 높이 20~30픽셀 이상에서 안정적이다
 TARGET_WIDTH = 1600
+# 키우는 배율과 결과 픽셀 수의 상한. 좁고 긴 이미지(예: 20x50000)를 키우다 메모리가 바닥나는 것을 막는다
+MAX_SCALE = 4.0
+MAX_PIXELS = 40_000_000
+# 이보다 길쭉한 이미지는 서류로 보지 않는다
+MAX_ASPECT = 20.0
 # 기울기 탐색 범위(도). 이보다 크게 기운 서류는 방향 감지(90도 단위)가 맡는다
 MAX_SKEW = 12.0
 # 이보다 작은 기울기는 고치지 않는다. 회전 보간이 오히려 글자를 흐린다
@@ -68,12 +73,21 @@ def load_gray(content: bytes) -> tuple[Image.Image, Transform]:
     return gray, Transform(gray.size)
 
 
+class ImageRejected(ValueError):
+    """서류로 읽을 수 없는 크기나 비율이다."""
+
+
 def upscale(image: Image.Image, transform: Transform) -> Image.Image:
-    if image.width >= TARGET_WIDTH:
+    """좁은 이미지는 키우고, 너무 큰 이미지는 줄인다. 결과는 항상 MAX_PIXELS 이하다."""
+    w, h = image.size
+    if max(w, h) / max(min(w, h), 1) > MAX_ASPECT:
+        raise ImageRejected("가로세로 비율이 서류 범위를 벗어남")
+    factor = min(TARGET_WIDTH / w, MAX_SCALE) if w < TARGET_WIDTH else 1.0
+    factor = min(factor, math.sqrt(MAX_PIXELS / (w * h)))
+    if abs(factor - 1.0) < 1e-6:
         return image
-    factor = TARGET_WIDTH / image.width
     transform.ops.append(("scale", factor))
-    return image.resize((TARGET_WIDTH, round(image.height * factor)), Image.LANCZOS)
+    return image.resize((max(1, round(w * factor)), max(1, round(h * factor))), Image.LANCZOS)
 
 
 def flatten(image: Image.Image) -> Image.Image:

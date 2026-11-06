@@ -65,17 +65,40 @@ git-crypt unlock /path/to/git-crypt.key   # 키는 담당자에게 받는다. �
 1. `POST /internal/review-jobs/claim`으로 작업과 작업 토큰을 받는다. `CLAIMED`
 2. 가명 처리한 소명과 다툼 거래를 읽는다. `CONTEXT_LOADED`
 3. 글자를 아직 읽지 않은 증빙(`ocrStatus != DONE`)을 내려받아 로컬에서 OCR하고 서버에 올린다. 서류마다 `OCR`.
-   서버가 가명 처리한 글자를 받으려고 context를 다시 읽는다. 서류 하나를 못 읽으면 그 `OCR` 단계에 실패로 남기고 다음으로 넘어간다
+   서버가 가명 처리한 글자를 받으려고 context를 다시 읽는다. 서류 하나를 못 읽으면 서버에 `FAILED`로 올리고 그 `OCR` 단계에 실패로 남긴 뒤 다음으로 넘어간다.
+   `FAILED` 서류는 재분석 때 다시 읽지 않고, 판정안 추가 확인 항목에 원본 직접 확인을 넣는다. PDF가 쪽 상한을 넘으면 뒷쪽은 읽지 않고 같은 방식으로 알린다
 4. 분석기가 `get_ledger` 도구로 원장을, `get_external_checks` 도구로 외부 확인 회신을 조회한다. 부를 때마다 `TOOL_CALL`
 5. 주장과 모순을 남긴다. `CLAIM_EXTRACTED`, `CONTRADICTION`. 주장마다 출처(`source`: `STATEMENT` 또는 `DOCUMENT`, 서류면 `documentId`, `regionIndex`)를 붙인다
 6. 판정안을 낸다. `DRAFT_SUBMITTED`. 서버가 게이트를 다시 계산해 `GATE_EVALUATED`를 남긴다
 7. 오류가 나면 `FAILED`를 남긴다. 시도가 남아 있으면 서버가 대기열로 돌린다
 
 판정안 근거 거래번호는 분석기가 실제로 조회한 번호로만 걸러서 낸다. 주장의 `documentId`, `regionIndex`도 분석기에 준 서류와 영역이 아니면 비운다.
+주장의 인용이 소명이나 그 서류 영역 글에 그대로 있는지 확인해 `quoteVerified`를 붙인다(공백 무시 부분 문자열).
+판정안은 서버 검증 상한(근거 100건, 목록 50건, 안내문 2000자 등)에 맞춰 자르고 빈 항목을 뺀다.
+
+### 보정 규칙(`objection_agent/policy.py`)
+
+모델 출력 뒤에 기계적으로 적용한다. 모델은 판정하는 동안 해제 요건 점검 결과를 보지 못한다.
+
+| 규칙 | 조건 | 결과 |
+|---|---|---|
+| `CONTRADICTION_BLOCKS_ACCEPT` | 수용 계열 판정안인데 모순이 1건 이상 | 판단 보류. 추가 확인 항목에 불일치 경위 확인 |
+| `GATE_LIMITS_ACCEPT` | 수용 계열 판정안인데 해제 요건 점검이 수용 근거를 인정하지 않음 | 판단 보류(점검이 일부 지급정지면 일부 지급정지) |
+
+바뀐 내역은 `DRAFT_SUBMITTED` 단계의 `branchAdjustments`에 남고, 안내문을 최종 판정에 맞춰 확인하라는 추가 확인 항목이 붙는다.
+
+### 실행 마감과 상한
+
+- 실행 전체 마감 `AGENT_RUN_DEADLINE_SECONDS`(기본 480초)는 서버 작업 토큰 유효 시간(10분)보다 짧다. 마감을 넘기면 토큰이 살아 있을 때 `FAILED`를 남겨 재시도하게 한다.
+- 모델 요청은 120초 제한, 429, 5xx, 529는 마감 안에서만 다시 시도한다. 도구 안에서 토큰을 잃으면(`PST0102`) 남은 턴을 쓰지 않고 바로 멈춘다.
+- 도구 결과는 200건, 6만 자, 한 분석의 도구 호출은 16회까지다. 넘으면 잘랐다는 사실을 모델에 알린다.
+- OCR 전처리는 배율 4배, 4천만 픽셀까지만 키우고 가로세로 비율 20 초과 이미지는 실패로 둔다. 자식 프로세스(tesseract, poppler)에는 API 키와 워커 키를 넘기지 않는다.
+- 소명과 서류 글은 데이터 구역을 닫지 못하도록 꺾쇠와 닮은 문자를 괄호로 바꾸고 폭 없는 문자를 지운다.
 
 ## 서류 OCR
 
-- 증빙(`EVIDENCE`)만 읽는다. 신분증 사본은 서버가 내부 API로 주지 않고, 워커도 증빙이 아닌 서류는 내려받거나 분석에 넣지 않는다(D37).
+- 증빙(`EVIDENCE`)만 읽는다. 신분증 사본은 서버가 내부 API로 주지 않는다(내부 API에서 `PST0205`). 실제 차단은 서버가 하고,
+  워커는 목록에 `kind`가 있으면 증빙이 아닌 것을 한 번 더 거른다(서버 목록에는 `kind`가 없어 평소에는 서버 차단만 동작한다)(D37).
 - 원본 이미지는 LLM에 보내지 않는다. 워커가 읽은 글자를 서버에 올리면 서버가 가명 처리해 저장하고, 분석에는 그 가명 처리한 줄만 들어간다.
 - 서류 내용은 주장이다. 원장 사실이 아니고 위조됐을 수 있어 근거 거래번호가 되지 않는다(D9). 금액이나 이체 일자가 다툼 거래와 다르면 모순으로 남긴다.
 - 엔진은 Tesseract CLI(`kor+eng`, TSV 출력으로 줄 단위 영역, 상자, 신뢰도)이고, PDF는 poppler `pdftoppm`으로 쪽 이미지로 바꿔 읽는다. 신뢰도 0.85 미만 영역 수를 `OCR` 단계에 함께 남긴다(D40).
@@ -86,8 +109,8 @@ git-crypt unlock /path/to/git-crypt.key   # 키는 담당자에게 받는다. �
 
 | `AGENT_LLM` | 동작 |
 |---|---|
-| `scripted` (기본) | API 키 없이 도는 규칙 분석기. 서버 게이트와 같은 기준을 근사한다. 리허설과 테스트용 |
-| `claude` | Claude 도구 루프. 마지막 답은 JSON 스키마 구조화 출력으로 받는다. 시스템 프롬프트를 캐시하고, 안전 분류기가 거절하면 서버 쪽 fallback(`fallbacks: "default"`)이 다른 모델로 다시 돌린다 |
+| `scripted` | API 키 없이 도는 규칙 분석기. 서버 게이트와 같은 기준을 근사한다. 리허설과 테스트용 |
+| `claude` (운영) | Claude 도구 루프. 마지막 답은 JSON 스키마 구조화 출력으로 받는다. 시스템 프롬프트를 캐시하고, 안전 분류기가 거절하면 서버 쪽 fallback(`fallbacks: "default"`)이 다른 모델로 다시 돌린다 |
 
 ## 환경변수
 
@@ -95,7 +118,7 @@ git-crypt unlock /path/to/git-crypt.key   # 키는 담당자에게 받는다. �
 |---|---|---|
 | `CORE_SERVER_URL` | `http://localhost:8080/api/v1` | 코어 서버 주소 |
 | `PAYMENT_STOP_WORKER_KEY` | (필수) | 서버 `app.payment-stop.agent.worker-key`와 같은 값 |
-| `AGENT_LLM` | `scripted` | `scripted` 또는 `claude` |
+| `AGENT_LLM` | (필수) | `claude` 또는 `scripted`. 비어 있으면 시작하지 않는다(운영에서 빠뜨려 규칙 분석기가 실제 사건에 쓰이는 것을 막는다) |
 | `ANTHROPIC_API_KEY` | | `claude`일 때 필수. 저장소에 두지 않는다 |
 | `AGENT_MODEL` | `claude-opus-5-5` | |
 | `AGENT_EFFORT` | `low` | |
@@ -104,7 +127,9 @@ git-crypt unlock /path/to/git-crypt.key   # 키는 담당자에게 받는다. �
 | `AGENT_MAX_TOOL_TURNS` | `8` | 도구 호출 상한 |
 | `AGENT_OCR` | `tesseract` | `tesseract` 또는 `off`(서류 글자 인식을 건너뛴다) |
 | `AGENT_OCR_LANG` | `kor+eng` | Tesseract 언어 |
-| `AGENT_OCR_MAX_PAGES` | `10` | PDF 한 건에서 읽는 최대 쪽 수 |
+| `AGENT_OCR_MAX_PAGES` | `10` | PDF 한 건에서 읽는 최대 쪽 수. 서버 상한 50을 넘기면 50으로 묶는다 |
+| `AGENT_OCR_PREPROCESS` | `true` | OCR 전처리 |
+| `AGENT_RUN_DEADLINE_SECONDS` | `480` | 실행 전체 마감. 서버 작업 토큰 유효 시간보다 짧게 둔다 |
 
 서버는 `PAYMENT_STOP_AGENT_ENABLED=true`와 같은 `PAYMENT_STOP_WORKER_KEY`로 띄운다. 킬스위치가 꺼져 있으면 작업이 오지 않는다.
 
@@ -118,10 +143,22 @@ uv pip install --python .venv/bin/python --require-hashes -r requirements.txt -r
 git config core.hooksPath .githooks          # 커밋 전 gitleaks
 git-crypt unlock /path/to/git-crypt.key      # 프롬프트와 평가 자료(암호화 파일)
 .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/python -m pytest -q
-PAYMENT_STOP_WORKER_KEY=... .venv/bin/python -m objection_agent
+AGENT_LLM=scripted PAYMENT_STOP_WORKER_KEY=... .venv/bin/python -m objection_agent
 docker build -t objection-worker .           # 잠금을 푼 작업 사본에서만. SECURITY.md
 ```
 
 의존성을 바꿀 때는 `requirements.in`, `requirements-dev.in`을 고치고 `uv pip compile <in> --python-version 3.12 --generate-hashes -o <txt>`로 잠근다.
 
-비용은 `costMicroUsd`(백만분의 1달러)로 판정안과 함께 서버에 남는다. 단가는 `llm/claude.py`의 `PRICE_MICRO_USD`다.
+비용은 `costMicroUsd`(백만분의 1달러)로 판정안과 함께 서버에 남는다. 단가는 `llm/claude.py`의 `PRICES_MICRO_USD`이고, 서버 쪽 fallback으로 다른 모델이 답하면 그 모델 단가로 센다.
+
+### 운영 실행
+
+```bash
+docker run -d --name objection-worker --restart unless-stopped \
+  --read-only --tmpfs /tmp:size=512m,mode=1777 --memory 2g --cpus 2 \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --env-file worker.env objection-worker
+```
+
+- 서류 원본은 `/tmp`에만 잠깐 놓인다. tmpfs라 컨테이너가 죽어도 디스크에 남지 않는다.
+- 메모리 상한을 두면 비정상 서류가 워커 하나만 죽이고 호스트는 지킨다. OCR 전처리 상한(4천만 픽셀) 기준 2GB면 충분하다.

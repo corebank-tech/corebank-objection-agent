@@ -43,7 +43,7 @@ class FakeOcr:
         self.by_content = by_content
         self.calls: list[bytes] = []
 
-    def recognize(self, content: bytes) -> list[dict[str, Any]]:
+    def recognize(self, content: bytes, check=None) -> list[dict[str, Any]]:
         self.calls.append(content)
         result = self.by_content[content]
         if isinstance(result, Exception):
@@ -59,10 +59,10 @@ class CapturingAnalyzer:
         self.contexts: list[dict[str, Any]] = []
         self.external_checks = None
 
-    def analyze(self, context, ledger, on_tool_call, external_checks=None):
+    def analyze(self, context, ledger, on_tool_call, external_checks=None, deadline=None):
         self.contexts.append(context)
         self.external_checks = external_checks
-        return self.inner.analyze(context, ledger, on_tool_call, external_checks)
+        return self.inner.analyze(context, ledger, on_tool_call, external_checks, deadline)
 
 
 def client(fake: FakeServer) -> ServerClient:
@@ -85,6 +85,7 @@ def test_ocr_round_trip_records_step_and_uses_pseudonymized_pages():
         "regions": 4,
         "lowConfidenceRegions": 0,
         "engine": "fake-ocr kor+eng",
+        "truncated": False,
     }
     # 원문은 서버에 올리고, 분석에는 서버가 가명 처리한 값이 다시 들어온다
     assert fake.ocr_puts[0]["engine"] == "fake-ocr kor+eng"
@@ -131,9 +132,14 @@ def test_ocr_failure_of_one_document_does_not_fail_run():
     assert ocr_steps[0]["title"] == "서류 글자 인식 실패"
     assert ocr_steps[0]["detail"]["error"] == "지원하지 않는 서류 형식"
     assert ocr_steps[1]["detail"]["regions"] == 4
-    assert [p["documentId"] for p in fake.ocr_puts] == [6]
+    # 읽지 못한 서류는 FAILED 로 남겨 재분석 때 다시 읽지 않는다
+    assert [(p["documentId"], p["status"]) for p in fake.ocr_puts] == [(5, "FAILED"), (6, "DONE")]
     assert fake.steps[-1]["type"] == "DRAFT_SUBMITTED"
-    assert fake.drafts
+    assert any("서류 5" in f for f in fake.drafts[0]["followUps"])
+
+    engine.calls.clear()
+    run_once(client(fake), ScriptedAnalyzer(), ocr=engine)
+    assert engine.calls == []
 
 
 def test_missing_document_is_ocr_failure_but_expired_token_stops_run():
@@ -252,7 +258,7 @@ def test_claude_external_checks_tool_and_document_prompt():
 
     first = messages.calls[0]
     assert [t["name"] for t in first["tools"]] == ["get_ledger", "get_external_checks"]
-    user = first["messages"][0]["content"]
+    user = first["messages"][0]["content"][0]["text"]
     assert '<document id="5" round="0">' in user
     assert "[2] 이체금액: 300,000원" in user
     tool_result = messages.calls[1]["messages"][2]["content"][0]
@@ -272,7 +278,7 @@ def test_claude_without_v2_server_offers_only_ledger_tool():
     run_once(client(fake), ClaudeAnalyzer("claude-opus-5-5", "low", 8, client_))
 
     assert [t["name"] for t in messages.calls[0]["tools"]] == ["get_ledger"]
-    assert "<documents>" not in messages.calls[0]["messages"][0]["content"]
+    assert "<documents>" not in messages.calls[0]["messages"][0]["content"][0]["text"]
     # 출처 필드가 없는 판정안도 STATEMENT 로 채워 보낸다
     assert fake.drafts[0]["claims"][0]["source"] == "STATEMENT"
 

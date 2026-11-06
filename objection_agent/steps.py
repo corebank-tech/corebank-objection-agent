@@ -6,7 +6,13 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
+
 from objection_agent.server import ServerClient
+
+# 응답이 유실되면 같은 순번, 같은 내용으로 다시 보낸다. 서버는 같은 내용의 재전송을 받아 주고,
+# 다른 내용이 같은 순번에 오면 PST0307 로 거부한다(agent_run_step_schema §3)
+RETRIES = 2
 
 # 서버 시각은 KST 로컬 시각이다. 워커가 도는 곳(컨테이너는 UTC)과 무관하게 KST 로 찍는다
 KST = timezone(timedelta(hours=9))
@@ -36,20 +42,24 @@ class StepRecorder:
         started_at: datetime | None = None,
     ) -> None:
         now = now_kst()
-        self._server.record_step(
-            self._token,
-            self._run_id,
-            {
-                "seq": self._seq,
-                "type": step_type,
-                "title": title[:200],
-                "summary": summary[:500] if summary else None,
-                "detail": detail,
-                "status": status,
-                "startedAt": (started_at or self._last_end).isoformat(timespec="microseconds"),
-                "endedAt": now.isoformat(timespec="microseconds"),
-            },
-        )
+        step = {
+            "seq": self._seq,
+            "type": step_type,
+            "title": title[:200],
+            "summary": summary[:500] if summary else None,
+            "detail": detail,
+            "status": status,
+            "startedAt": (started_at or self._last_end).isoformat(timespec="microseconds"),
+            "endedAt": now.isoformat(timespec="microseconds"),
+        }
+        for attempt in range(RETRIES + 1):
+            try:
+                self._server.record_step(self._token, self._run_id, step)
+                break
+            except httpx.TransportError:
+                if attempt == RETRIES:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
         self._seq += 1
         if self._delay:
             time.sleep(self._delay)

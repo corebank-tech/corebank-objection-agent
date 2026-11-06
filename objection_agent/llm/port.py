@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -54,6 +55,32 @@ class AnalysisRefused(RuntimeError):
     """모델이 응답을 거절했거나 형식을 지키지 못했다. 워커가 FAILED 단계로 남긴다."""
 
 
+class AnalysisAborted(RuntimeError):
+    """작업 토큰이 만료됐거나 점유를 잃었다. 서버가 실행을 이미 정리했으므로 더 부르지 않고 바로 멈춘다."""
+
+
+class DeadlineExceeded(RuntimeError):
+    """실행 마감을 넘겼다. 토큰이 만료되기 전에 FAILED 로 남겨 재시도하게 한다."""
+
+
+@dataclass
+class Deadline:
+    """실행 전체 마감. 작업 토큰 유효 시간(서버 10분)보다 짧게 잡아 토큰이 살아 있을 때 실패를 기록한다."""
+
+    expires_at: float  # time.monotonic() 기준
+
+    @staticmethod
+    def after(seconds: float) -> Deadline:
+        return Deadline(time.monotonic() + seconds)
+
+    def remaining(self) -> float:
+        return self.expires_at - time.monotonic()
+
+    def check(self, stage: str, reserve: float = 0.0) -> None:
+        if self.remaining() <= reserve:
+            raise DeadlineExceeded(f"실행 마감 초과({stage})")
+
+
 class Analyzer(Protocol):
     def analyze(
         self,
@@ -61,4 +88,5 @@ class Analyzer(Protocol):
         ledger: LedgerFn,
         on_tool_call: ToolCallback,
         external_checks: ExternalChecksFn | None = None,
+        deadline: Deadline | None = None,
     ) -> Analysis: ...
