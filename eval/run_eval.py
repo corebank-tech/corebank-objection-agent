@@ -22,7 +22,8 @@ MYSQL_CONTAINER = os.environ.get("EVAL_MYSQL_CONTAINER", "objection-demo-mysql")
 MYSQL_PASSWORD = os.environ.get("EVAL_MYSQL_PASSWORD", "localpw")
 ADMIN_PASSWORD = os.environ.get("EVAL_ADMIN_PASSWORD", "Admin1234!")  # 서버 local 프로필 시드 계정
 # 다른 세트(홀드아웃 등)는 EVAL_MANIFEST 와 EVAL_TAG 로 고른다. 접수 번호 파일이 세트마다 따로 생긴다
-MANIFEST = json.loads(Path(os.environ.get("EVAL_MANIFEST", HERE / "manifest.json")).read_text())
+MANIFEST_PATH = Path(os.environ.get("EVAL_MANIFEST", HERE / "manifest.json"))
+MANIFEST = json.loads(MANIFEST_PATH.read_text())
 OBJECTIONS = HERE / (f"objections-{os.environ['EVAL_TAG']}.json" if os.environ.get("EVAL_TAG") else "objections.json")
 
 
@@ -191,6 +192,8 @@ def collect():
     by_objection = {v: k for k, v in ids.items()}
     for run in runs:
         run["scenario"] = by_objection.get(run["objection"])
+    # 이 세트의 접수 건 실행만 남기고 어느 정답 세트로 채점해야 하는지 표시한다
+    runs = [dict(run, set=MANIFEST_PATH.stem) for run in runs if run["scenario"] is not None]
     (HERE / "results.json").write_text(json.dumps(runs, ensure_ascii=False, indent=1))
     print("collected", len(runs))
 

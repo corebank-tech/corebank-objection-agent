@@ -33,6 +33,8 @@ jobs:
           echo "$GIT_CRYPT_KEY" | base64 -d > "$RUNNER_TEMP/git-crypt.key"
           git-crypt unlock "$RUNNER_TEMP/git-crypt.key"
           rm "$RUNNER_TEMP/git-crypt.key"
+          # unlock 은 키를 .git/git-crypt 에 복사해 둔다. 뒤 단계(테스트 코드)가 키를 읽지 못하게 지운다. 풀린 파일은 그대로 남는다
+          rm -rf .git/git-crypt
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
@@ -64,6 +66,12 @@ jobs:
       # 이미지는 빌드만 확인하고 올리지 않는다. 암호화를 풀지 않은 채 빌드해서 프롬프트가 이미지에 들어가지 않는다
       - name: docker build
         run: docker build -t objection-worker:ci .
+      # 프롬프트는 암호화된 채라 워커 전체는 import 하지 못한다. OCR 의존성과 암호화되지 않은 모듈만 확인한다
+      - name: 이미지 안 OCR 도구와 모듈
+        run: |
+          docker run --rm objection-worker:ci tesseract --list-langs
+          docker run --rm objection-worker:ci pdftoppm -v
+          docker run --rm objection-worker:ci python -c "import objection_agent.ocr, objection_agent.preprocess, objection_agent.policy"
 
   secrets:
     runs-on: ubuntu-latest
@@ -74,4 +82,4 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: gitleaks(전체 이력)
-        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --verbose --no-banner
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact --verbose --no-banner
