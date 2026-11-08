@@ -23,6 +23,8 @@ MYSQL_PASSWORD = os.environ.get("EVAL_MYSQL_PASSWORD", "localpw")
 ADMIN_PASSWORD = os.environ.get("EVAL_ADMIN_PASSWORD", "Admin1234!")  # 서버 local 프로필 시드 계정
 # 다른 세트(홀드아웃 등)는 EVAL_MANIFEST 와 EVAL_TAG 로 고른다. 접수 번호 파일이 세트마다 따로 생긴다
 MANIFEST_PATH = Path(os.environ.get("EVAL_MANIFEST", HERE / "manifest.json"))
+# 이 번호보다 큰 실행만 센다. 같은 접수 건으로 설정(추론 수준 등)을 바꿔 다시 잴 때 앞선 실행과 섞지 않는다
+MIN_RUN_ID = int(os.environ.get("EVAL_MIN_RUN_ID", "0"))
 MANIFEST = json.loads(MANIFEST_PATH.read_text())
 OBJECTIONS = HERE / (f"objections-{os.environ['EVAL_TAG']}.json" if os.environ.get("EVAL_TAG") else "objections.json")
 
@@ -150,7 +152,7 @@ def drive(target: int):
     while True:
         rows = sql(
             "SELECT objection_id, COUNT(*), SUM(status IN ('COMPLETED','FAILED')), MAX(status IN ('QUEUED','RUNNING'))"
-            " FROM agent_run GROUP BY objection_id"
+            f" FROM agent_run WHERE run_id > {MIN_RUN_ID} GROUP BY objection_id"
         )
         state = {int(r.split("\t")[0]): tuple(int(x or 0) for x in r.split("\t")[1:]) for r in rows}
         done = 0
@@ -182,7 +184,7 @@ def collect():
       'tools', (SELECT JSON_ARRAYAGG(s.detail) FROM agent_run_step s WHERE s.run_id = r.run_id AND s.type = 'TOOL_CALL'),
       'failedSteps', (SELECT COUNT(*) FROM agent_run_step s WHERE s.run_id = r.run_id AND s.type = 'FAILED'),
       'statement', (SELECT o.statement FROM objection o WHERE o.objection_id = r.objection_id))
-    FROM agent_run r ORDER BY r.run_id"""
+    FROM agent_run r WHERE r.run_id > {min_run} ORDER BY r.run_id""".replace("{min_run}", str(MIN_RUN_ID))
     runs = [json.loads(line) for line in sql(query)]
     for run in runs:
         for key in ("draft", "gate", "submitted"):

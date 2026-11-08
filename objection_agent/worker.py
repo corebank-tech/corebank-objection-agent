@@ -43,14 +43,15 @@ def run_once(
     step_delay: float = 0.0,
     ocr: OcrEngine | None = None,
     deadline_seconds: float = 480.0,
+    lease_seconds: float = 270.0,
 ) -> bool:
     """분석 하나를 처리한다. 대기열이 비었으면 False. ocr 이 None 이면 서류 글자 인식을 건너뛴다."""
     job = server.claim()
     if job is None:
         return False
-    deadline = Deadline.after(deadline_seconds)
     token, run_id, objection_id = job["jobToken"], job["runId"], job["objectionId"]
     steps = StepRecorder(server, token, run_id, job["nextSeq"], step_delay)
+    deadline = Deadline.after(deadline_seconds, lambda: steps.last_recorded, lease_seconds)
     log.info("분석 시작 runId=%s objectionId=%s attempt=%s", run_id, objection_id, job["attempt"])
 
     try:
@@ -485,7 +486,9 @@ def main() -> None:
     log.info("워커 시작 server=%s llm=%s model=%s ocr=%s", config.server_base_url, config.llm, config.model, config.ocr)
     while True:
         try:
-            if not run_once(server, analyzer, config.step_delay_seconds, ocr, config.run_deadline_seconds):
+            if not run_once(
+                server, analyzer, config.step_delay_seconds, ocr, config.run_deadline_seconds, config.lease_seconds
+            ):
                 time.sleep(config.poll_seconds)
         except KeyboardInterrupt:
             break

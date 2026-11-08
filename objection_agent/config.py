@@ -24,6 +24,8 @@ class Config:
     ocr_preprocess: bool = True  # 방향, 기울기, 조명, 잡음 보정(objection_agent.preprocess)
     # 실행 전체 마감(초). 서버 작업 토큰 유효 시간(10분)보다 짧아야 토큰이 살아 있을 때 실패를 남긴다
     run_deadline_seconds: float = 480.0
+    # 서버 점유 시간(5분)보다 짧게. 마지막 단계 기록 뒤 이 시간 안에 다음 단계를 남기지 못하면 실패로 남긴다
+    lease_seconds: float = 270.0
 
     @staticmethod
     def from_env() -> Config:
@@ -41,4 +43,5 @@ class Config:
             ocr_max_pages=int(os.environ.get("AGENT_OCR_MAX_PAGES", "10")),
             ocr_preprocess=os.environ.get("AGENT_OCR_PREPROCESS", "true").lower() != "false",
             run_deadline_seconds=float(os.environ.get("AGENT_RUN_DEADLINE_SECONDS", "480")),
+            lease_seconds=float(os.environ.get("AGENT_LEASE_SECONDS", "270")),
         )
