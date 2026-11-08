@@ -31,6 +31,8 @@ class StepRecorder:
         self._delay = delay_seconds
         # 단계의 시작은 앞 단계가 끝난 때다. 모델이 생각하고 도구를 고른 시간이 그 단계의 소요 시간으로 보인다
         self._last_end = now_kst()
+        # 서버 점유는 단계를 기록할 때 연장된다. 실행 마감이 점유 시계를 보려고 마지막 기록 시각을 남긴다
+        self.last_recorded = time.monotonic()
 
     def record(
         self,
@@ -55,6 +57,7 @@ class StepRecorder:
         for attempt in range(RETRIES + 1):
             try:
                 self._server.record_step(self._token, self._run_id, step)
+                self.last_recorded = time.monotonic()
                 break
             except httpx.TransportError:
                 if attempt == RETRIES:

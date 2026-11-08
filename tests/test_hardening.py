@@ -287,3 +287,23 @@ def _context():
         "disputedTransfers": [],
         "statement": "친구에게 빌려준 돈입니다.",
     }
+
+
+def test_lease_clock_fails_run_before_server_lease_expires():
+    # 모델이 오래 생각해 단계 기록이 끊기면 서버 점유가 풀린다. 점유 시계가 먼저 다 되면 토큰이 살아 있을 때 실패를 남긴다
+    c, messages = fake_client([final_response()])
+    fake = FakeServer(relationship_ledger(), "친구에게 빌려준 돈입니다.")
+    run_once(
+        client(fake), ClaudeAnalyzer("claude-opus-5-5", "low", 4, client=c), deadline_seconds=480, lease_seconds=0.001
+    )
+    assert messages.calls == []
+    assert fake.steps[-1]["type"] == "FAILED"
+
+
+def test_lease_clock_resets_on_each_step():
+    anchor = {"t": 0.0}
+    deadline = Deadline(expires_at=1_000_000.0, lease_anchor=lambda: anchor["t"], lease_seconds=100.0)
+    import time as _time
+
+    anchor["t"] = _time.monotonic()
+    assert 90 < deadline.remaining() <= 100

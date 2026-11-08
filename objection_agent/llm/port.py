@@ -65,16 +65,27 @@ class DeadlineExceeded(RuntimeError):
 
 @dataclass
 class Deadline:
-    """실행 전체 마감. 작업 토큰 유효 시간(서버 10분)보다 짧게 잡아 토큰이 살아 있을 때 실패를 기록한다."""
+    """실행 마감. 두 시계 중 먼저 오는 쪽을 따른다.
+
+    - 실행 전체: 작업 토큰 유효 시간(서버 10분)보다 짧게 잡는다.
+    - 점유: 서버는 단계를 기록할 때만 점유를 연장한다(서버 5분). 모델이 오래 생각하는 동안 단계가 없으면 점유가 끊겨 토큰이
+      무효가 되므로, 마지막 단계 기록 시각부터 점유 시간 안에 끝나야 한다. lease_anchor 가 마지막 기록 시각(monotonic)을 준다.
+    """
 
     expires_at: float  # time.monotonic() 기준
+    lease_anchor: Callable[[], float] | None = None
+    lease_seconds: float = 0.0
 
     @staticmethod
-    def after(seconds: float) -> Deadline:
-        return Deadline(time.monotonic() + seconds)
+    def after(seconds: float, lease_anchor: Callable[[], float] | None = None, lease_seconds: float = 0.0) -> Deadline:
+        return Deadline(time.monotonic() + seconds, lease_anchor, lease_seconds)
 
     def remaining(self) -> float:
-        return self.expires_at - time.monotonic()
+        now = time.monotonic()
+        left = self.expires_at - now
+        if self.lease_anchor is not None and self.lease_seconds > 0:
+            left = min(left, self.lease_anchor() + self.lease_seconds - now)
+        return left
 
     def check(self, stage: str, reserve: float = 0.0) -> None:
         if self.remaining() <= reserve:
