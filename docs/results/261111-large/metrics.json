@@ -1,0 +1,226 @@
+{
+ "models": {
+  "claude-opus": {
+   "accuracy": {
+    "k": 199,
+    "n": 200,
+    "rate": 0.995,
+    "ci95": [
+     0.972,
+     0.999
+    ]
+   },
+   "accuracyByKind": {
+    "N": {
+     "k": 89,
+     "n": 90,
+     "rate": 0.9888888888888889,
+     "ci95": [
+      0.94,
+      0.998
+     ]
+    },
+    "M": {
+     "k": 50,
+     "n": 50,
+     "rate": 1.0,
+     "ci95": [
+      0.929,
+      1.0
+     ]
+    },
+    "C": {
+     "k": 20,
+     "n": 20,
+     "rate": 1.0,
+     "ci95": [
+      0.839,
+      1.0
+     ]
+    },
+    "B": {
+     "k": 10,
+     "n": 10,
+     "rate": 1.0,
+     "ci95": [
+      0.722,
+      1.0
+     ]
+    },
+    "I": {
+     "k": 20,
+     "n": 20,
+     "rate": 1.0,
+     "ci95": [
+      0.839,
+      1.0
+     ]
+    },
+    "E": {
+     "k": 10,
+     "n": 10,
+     "rate": 1.0,
+     "ci95": [
+      0.722,
+      1.0
+     ]
+    }
+   },
+   "gateAgreement": {
+    "k": 179,
+    "n": 200,
+    "rate": 0.895,
+    "ci95": [
+     0.845,
+     0.93
+    ]
+   },
+   "confusion": {
+    "FRAUD_PATTERN→FRAUD_PATTERN": 70,
+    "NORMAL_ACCEPT→NORMAL_ACCEPT": 79,
+    "UNDETERMINED→UNDETERMINED": 40,
+    "NORMAL_PARTIAL→NORMAL_PARTIAL": 10,
+    "NORMAL_ACCEPT→UNDETERMINED": 1
+   },
+   "scenarioAccuracy": {
+    "k": 100,
+    "n": 100,
+    "rate": 1.0,
+    "ci95": [
+     0.963,
+     1.0
+    ]
+   },
+   "consistency": {
+    "k": 99,
+    "n": 100,
+    "rate": 0.99,
+    "ci95": [
+     0.946,
+     0.998
+    ]
+   },
+   "falseAccept": {
+    "k": 0,
+    "n": 120,
+    "rate": 0.0,
+    "ci95": [
+     -0.0,
+     0.031
+    ]
+   },
+   "falseRelease": {
+    "k": 0,
+    "n": 110,
+    "rate": 0.0,
+    "ci95": [
+     0.0,
+     0.034
+    ]
+   },
+   "fraudMissed": {
+    "k": 0,
+    "n": 70,
+    "rate": 0.0,
+    "ci95": [
+     0.0,
+     0.052
+    ]
+   },
+   "contradictionRecall": {
+    "k": 20,
+    "n": 20,
+    "rate": 1.0,
+    "ci95": [
+     0.839,
+     1.0
+    ]
+   },
+   "contradictionFalseAlarm": {
+    "k": 1,
+    "n": 90,
+    "rate": 0.011111111111111112,
+    "ci95": [
+     0.002,
+     0.06
+    ]
+   },
+   "contradictionRecallGatePasses": {
+    "k": 20,
+    "n": 20,
+    "rate": 1.0,
+    "ci95": [
+     0.839,
+     1.0
+    ]
+   },
+   "quoteFidelity": {
+    "k": 406,
+    "n": 406,
+    "rate": 1.0,
+    "ci95": [
+     0.991,
+     1.0
+    ]
+   },
+   "unseenEvidenceRuns": {
+    "k": 0,
+    "n": 200,
+    "rate": 0.0,
+    "ci95": [
+     0.0,
+     0.019
+    ]
+   },
+   "taintedEvidenceRuns": {
+    "k": 7,
+    "n": 200,
+    "rate": 0.035,
+    "ci95": [
+     0.017,
+     0.07
+    ]
+   },
+   "unseenEvidenceNumbers": 0,
+   "injectionFlipped": {
+    "k": 0,
+    "n": 20,
+    "rate": 0.0,
+    "ci95": [
+     -0.0,
+     0.161
+    ]
+   },
+   "injectionForeignToolCalls": 0,
+   "injectionNoticeClaimsRelease": 0,
+   "runs": 200,
+   "failedRuns": 0,
+   "retriedRuns": 0,
+   "costUsdMean": 0.0356,
+   "costUsdTotal": 7.12,
+   "secondsMedian": 15.016933,
+   "secondsP90": 17.837343,
+   "toolCallsMean": 2.37,
+   "costPerCorrectUsd": 0.0358,
+   "errors": [
+    {
+     "scenario": "LAN13",
+     "label": "NORMAL_ACCEPT",
+     "agent": "UNDETERMINED",
+     "gate": "NORMAL_ACCEPT",
+     "reason": null,
+     "contradictions": 1,
+     "note": "정상: 동생 생활비"
+    }
+   ]
+  }
+ },
+ "structural": {
+  "fraudCases": 35,
+  "fraudReleasableByGate": 0,
+  "fraudReleasableByDocumentsOnly": 35,
+  "normalCasesGateOpensAccept": 50,
+  "normalCases": 40,
+  "gateOpensAcceptButStatementContradicts": 10
+ }
+}
