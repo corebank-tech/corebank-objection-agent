@@ -29,7 +29,14 @@ jobs:
           GIT_CRYPT_KEY: ${{ secrets.GIT_CRYPT_KEY }}
         run: |
           test -n "$GIT_CRYPT_KEY" || { echo "GIT_CRYPT_KEY 가 없습니다(포크 PR 이면 정상)"; exit 1; }
-          sudo apt-get install -y -qq git-crypt
+          # 실행 환경 이미지에 든 패키지 목록이 접근 안 되는 저장소(security.ubuntu.com)를 가리키는 일이 있다(11/11).
+          # 목록을 새로 받고, 일시 장애에 대비해 세 번까지 다시 시도한다. 목록 갱신의 일부 실패는 설치를 막지 않는다
+          for attempt in 1 2 3; do
+            sudo apt-get update -qq || true
+            sudo apt-get install -y -qq git-crypt && break
+            [ "$attempt" = 3 ] && exit 1
+            sleep 10
+          done
           echo "$GIT_CRYPT_KEY" | base64 -d > "$RUNNER_TEMP/git-crypt.key"
           git-crypt unlock "$RUNNER_TEMP/git-crypt.key"
           rm "$RUNNER_TEMP/git-crypt.key"
