@@ -1,5 +1,5 @@
 # 기반 이미지는 다이제스트로 고정한다. 갱신은 Dependabot 이 PR 로 올린다
-FROM python:3.12-slim@sha256:e695ab189fa2d082b1c61c69a6b888a5adeca61ceeccad107b1ed2a125721a9e
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 # OMP_THREAD_LIMIT: 워커 여럿이 한 호스트에서 돌 때 tesseract 가 코어를 독차지하지 않게 한다
 ENV PYTHONDONTWRITEBYTECODE=1 \
